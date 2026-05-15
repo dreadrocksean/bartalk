@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "311577709263",
+    "firebase_url": "https://bartalk-75142-default-rtdb.firebaseio.com",
+    "project_id": "bartalk-75142",
+    "storage_bucket": "bartalk-75142.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:311577709263:android:02d7596253f1caea8105ba",
+        "android_client_info": {
+          "package_name": "com.dreadrocksoftware.bartalk"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "311577709263-5uejeptdkdpno7qcfcif3mfvt0pqtipr.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD3DzSV-jJzjs8VQhZc84YuAyTyDhFaxMs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "311577709263-5uejeptdkdpno7qcfcif3mfvt0pqtipr.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "311577709263-rt0v88iolg84rf98ae4fjo1ocq4h9re3.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.dreadrocksoftware.bartalk"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

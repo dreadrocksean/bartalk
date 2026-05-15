@@ -1,0 +1,60 @@
+import { StyleSheet } from "react-native";
+import { Colors } from "../../../constants/theme";
+
+export default StyleSheet.create({
+  container: { flex: 1, backgroundColor: Colors.light.background },
+  header: {
+    fontSize: 34,
+    fontWeight: "bold",
+    marginBottom: 8,
+    marginTop: 8,
+    marginLeft: 4,
+  },
+searchBar: {
+    backgroundColor: Colors.light.inputBar,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginHorizontal: 8,
+    marginBottom: 12,
+    fontSize: 16,
+    borderWidth: 1,
+    borderColor: Colors.light.border,
+} as const,
+  list: { paddingTop: 8 },
+  row: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: Colors.light.bubbleOther,
+    borderBottomWidth: 1,
+    borderColor: Colors.light.border,
+  },
+  avatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 14,
+    backgroundColor: Colors.light.tint,
+  },
+  avatarText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 20,
+  },
+  info: { flex: 1 },
+  name: { fontSize: 18, marginBottom: 2 },
+  lastMessage: { color: Colors.light.icon, fontSize: 15 },
+  chevron: { marginLeft: 8 },
+  unreadDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: Colors.light.bubbleMe,
+    marginRight: 8,
+    alignSelf: "center",
+  },
+});
