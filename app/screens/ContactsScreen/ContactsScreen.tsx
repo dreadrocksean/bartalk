@@ -10,7 +10,7 @@ import {
   type FirebaseFirestoreTypes,
 } from "@react-native-firebase/firestore";
 import { useRouter } from "expo-router";
-import React, { useCallback, useEffect, useState } from "react";
+import { FC, useCallback, useEffect, useState } from "react";
 import {
   FlatList,
   Modal,
@@ -53,10 +53,11 @@ type Conversation = {
   readReceipts?: ReadReceipts;
 };
 
-const ContactsScreen: React.FC<ContactsScreenProps> = ({ user }) => {
+const ContactsScreen: FC<ContactsScreenProps> = ({ user }) => {
   const router = useRouter();
-  const [menuVisible, setMenuVisible] = React.useState(false);
+  const [menuVisible, setMenuVisible] = useState(false);
   const [contacts, setContacts] = useState<UserDoc[]>([]);
+  const [myUser, setMyUser] = useState<UserDoc | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
 
   useEffect(() => {
@@ -68,15 +69,21 @@ const ContactsScreen: React.FC<ContactsScreenProps> = ({ user }) => {
       try {
         const usersCol = collection(db, "Users");
         const usersSnap = await getDocs(usersCol);
-        const users = usersSnap.docs
-          .map((doc: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({
+        const allUsers = usersSnap.docs.map(
+          (doc: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({
             id: doc.id,
             ...(doc.data() as Omit<UserDoc, "id">),
-          }))
-          .filter((u: UserDoc) => u.id !== user.uid);
+          }),
+        );
+        const myUser = allUsers.find((u: UserDoc) => u.id === user.uid);
+        if (!myUser) {
+          console.warn("Current user document not found in Users collection");
+        }
+        const users = allUsers.filter((u: UserDoc) => u.id !== user.uid);
         if (!ignore) {
           setContacts(users);
         }
+        setMyUser(myUser);
       } catch (e) {
         console.error("Failed to fetch contacts:", e);
       }
@@ -237,7 +244,10 @@ const ContactsScreen: React.FC<ContactsScreenProps> = ({ user }) => {
   );
 
   // User avatar initials
-  const initials = (user.displayName || user.email || "?")
+  const fullName = myUser
+    ? `${myUser.fname ?? ""} ${myUser.lname ?? ""}`.trim()
+    : "";
+  const initials = (user.displayName ?? fullName ?? "?")
     .split(" ")
     .map((n: string) => n?.[0] ?? "")
     .join("")

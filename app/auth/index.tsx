@@ -85,6 +85,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           password,
         );
         user = userCredential.user;
+        await createUserProfile(user.uid, {
+          email: user.email || email,
+          phone: user.phoneNumber || "",
+        });
       }
       // Request notification permissions and get Expo push token
       const expoPushToken = await requestPushPermissionAndToken();

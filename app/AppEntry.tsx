@@ -4,8 +4,8 @@ import {
   type FirebaseAuthTypes,
 } from "@react-native-firebase/auth";
 import { useEffect, useState } from "react";
-import { ActivityIndicator, View } from "react-native";
-import { updateUserExpoPushToken } from "../api";
+import { ActivityIndicator, Alert, View } from "react-native";
+import { getUserExpoPushToken, updateUserExpoPushToken } from "../api";
 import { getFirebaseAuth } from "../firebase";
 import AuthScreen from "./auth";
 import ContactsScreen from "./screens/ContactsScreen/ContactsScreen";
@@ -29,6 +29,45 @@ const AppEntry = () => {
     let isActive = true;
 
     (async () => {
+      let existingToken: string | null = null;
+      try {
+        existingToken = await getUserExpoPushToken(user.uid);
+      } catch {
+        existingToken = null;
+      }
+
+      if (!isActive) return;
+      if (existingToken && existingToken.trim().length > 0) return;
+
+      const shouldAskForPermission = await new Promise<boolean>((resolve) => {
+        let resolved = false;
+        const resolveOnce = (value: boolean) => {
+          if (resolved) return;
+          resolved = true;
+          resolve(value);
+        };
+        Alert.alert(
+          "Stay in the loop",
+          "Enable notifications so you don't miss new messages.",
+          [
+            {
+              text: "Not now",
+              style: "cancel",
+              onPress: () => resolveOnce(false),
+            },
+            {
+              text: "Allow",
+              onPress: () => resolveOnce(true),
+            },
+          ],
+          {
+            cancelable: true,
+            onDismiss: () => resolveOnce(false),
+          },
+        );
+      });
+
+      if (!isActive || !shouldAskForPermission) return;
       const expoPushToken = await requestPushPermissionAndToken();
       if (!isActive || !expoPushToken) return;
       try {

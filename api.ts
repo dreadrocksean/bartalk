@@ -1,6 +1,6 @@
 // Mark conversation as read for a user
 // Create a user profile in Firestore Users collection
-import {
+import firestore, {
   addDoc,
   collection,
   deleteDoc,
@@ -11,10 +11,10 @@ import {
   onSnapshot,
   orderBy,
   query,
-  setDoc,
   updateDoc,
 } from "@react-native-firebase/firestore";
 import { Alert } from "react-native";
+import type { ReplyReference } from "./app/types/firestore";
 import { getFirebaseDb } from "./firebase";
 
 // ***************************//
@@ -99,6 +99,34 @@ export const markConversationRead = async ({
   }
 };
 
+export const listenForConversation = (
+  conversationId: string,
+  callback: (conversation: FirebaseFirestoreTypes.DocumentData | null) => void,
+) => {
+  const convoDoc = doc(getDb(), "conversations", conversationId);
+  return onSnapshot(convoDoc, (snapshot) => {
+    callback(snapshot.exists() ? snapshot.data() ?? null : null);
+  });
+};
+
+export const setConversationTyping = async ({
+  conversationId,
+  userId,
+  isTyping,
+}: {
+  conversationId: string;
+  userId: string;
+  isTyping: boolean;
+}) => {
+  const convoDoc = doc(getDb(), "conversations", conversationId);
+  await updateDoc(convoDoc, {
+    [`typingStatus.${userId}`]: {
+      isTyping,
+      updatedAt: Date.now(),
+    },
+  });
+};
+
 // ***************************//
 // Messages in a conversation //
 // ***************************//
@@ -131,6 +159,7 @@ export const sendMessage = async (
     sender: string;
     timestamp: number;
     receiverId: string;
+    replyTo?: ReplyReference;
     receiverPushToken?: string | null;
     senderPushToken?: string | null;
   },
@@ -183,12 +212,67 @@ export const deleteMessage = (conversationId: string, messageId: string) => {
 // ***************************//
 // -----------Users-----------//
 // ***************************//
+type UserProfileData = {
+  fname?: string;
+  lname?: string;
+  phone?: string;
+  email?: string;
+};
+
+const normalizeUserProfileData = (data: UserProfileData) => {
+  const normalized: UserProfileData = {};
+  const entries = Object.entries(data) as Array<
+    [keyof UserProfileData, string | undefined]
+  >;
+
+  for (const [key, value] of entries) {
+    if (typeof value !== "string") continue;
+    const trimmedValue = value.trim();
+    if (trimmedValue.length > 0) {
+      normalized[key] = trimmedValue;
+    }
+  }
+
+  return normalized;
+};
+
 export const createUserProfile = async (
   uid: string,
-  data: { fname: string; lname: string; phone: string; email: string },
+  data: UserProfileData,
 ) => {
-  const userDoc = doc(getDb(), "Users", uid);
-  await setDoc(userDoc, data);
+  const db = getDb();
+  const userDoc = doc(db, "Users", uid);
+  const normalizedData = normalizeUserProfileData(data);
+  const serverNow = () => firestore.FieldValue.serverTimestamp();
+
+  await db.runTransaction(async (transaction) => {
+    const snapshot = await transaction.get(userDoc);
+
+    if (snapshot.exists()) {
+      const existing = snapshot.data() ?? {};
+      const updates: Record<string, unknown> = {
+        ...normalizedData,
+        updatedAt: serverNow(),
+        lastSignIn: serverNow(),
+      };
+      if (!existing.createdAt) {
+        updates.createdAt = serverNow();
+      }
+      transaction.set(userDoc, updates, { merge: true });
+      return;
+    }
+
+    transaction.set(userDoc, {
+      fname: "",
+      lname: "",
+      phone: "",
+      email: "",
+      ...normalizedData,
+      createdAt: serverNow(),
+      updatedAt: serverNow(),
+      lastSignIn: serverNow(),
+    });
+  });
 };
 
 export const updateUserExpoPushToken = async (

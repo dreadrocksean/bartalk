@@ -55,31 +55,85 @@ export const sendPushNotification = runWith({maxInstances: 10})
         });
         return null;
       }
+      const normalizedReceiverId = receiverId.trim();
+      const senderId =
+        typeof message.sender === "string" ? message.sender.trim() : "";
+      if (senderId.length === 0) {
+        functions.logger.warn("Message missing valid sender", {
+          conversationId: context.params.conversationId,
+          messageId: context.params.messageId,
+        });
+        return null;
+      }
+      if (senderId === normalizedReceiverId) {
+        functions.logger.info(
+          "Skipping push because sender and receiver are the same user",
+          {
+            senderId,
+            receiverId: normalizedReceiverId,
+            messageId: context.params.messageId,
+          },
+        );
+        return null;
+      }
 
-      const userSnap = await db.collection("Users").doc(receiverId).get();
+      const userSnap = await db
+        .collection("Users")
+        .doc(normalizedReceiverId)
+        .get();
       const expoPushToken = userSnap.data()?.expoPushToken;
       if (typeof expoPushToken !== "string" || expoPushToken.length === 0) {
         functions.logger.info("No server-side push token found for receiver", {
-          receiverId,
+          receiverId: normalizedReceiverId,
           messageId: context.params.messageId,
         });
+        return null;
+      }
+      const senderPushToken =
+        typeof message.senderPushToken === "string" ?
+          message.senderPushToken :
+          null;
+      if (senderPushToken && senderPushToken === expoPushToken) {
+        functions.logger.info(
+          "Skipping push because receiver token matches sender device token",
+          {
+            senderId,
+            receiverId: normalizedReceiverId,
+            messageId: context.params.messageId,
+          },
+        );
         return null;
       }
 
       const text = String(message.text || "You have a new message");
       const body = text.length > 100 ? `${text.slice(0, 97)}...` : text;
+      const replyToMessageId =
+        typeof message.replyTo?.messageId === "string" ?
+          message.replyTo.messageId :
+          null;
+      const payloadData: {
+        conversationId: string;
+        senderId: string;
+        receiverId: string;
+        messageId: string;
+        replyToMessageId?: string;
+      } = {
+        conversationId: context.params.conversationId,
+        senderId,
+        receiverId: normalizedReceiverId,
+        messageId: context.params.messageId,
+      };
+      if (replyToMessageId) {
+        payloadData.replyToMessageId = replyToMessageId;
+      }
+
       const payload = {
         to: expoPushToken,
         sound: "default",
         channelId: ANDROID_NOTIFICATION_CHANNEL_ID,
-        title: "New message",
+        title: replyToMessageId ? "New reply" : "New message",
         body,
-        data: {
-          conversationId: context.params.conversationId,
-          senderId: message.sender,
-          receiverId,
-          messageId: context.params.messageId,
-        },
+        data: payloadData,
       };
 
       try {
@@ -97,7 +151,7 @@ export const sendPushNotification = runWith({maxInstances: 10})
           functions.logger.error("Expo push request failed", {
             status: response.status,
             body: rawBody,
-            receiverId,
+            receiverId: normalizedReceiverId,
           });
           return null;
         }
@@ -108,7 +162,7 @@ export const sendPushNotification = runWith({maxInstances: 10})
         } catch {
           functions.logger.error("Expo push response was not valid JSON", {
             body: rawBody,
-            receiverId,
+            receiverId: normalizedReceiverId,
           });
           return null;
         }
@@ -123,7 +177,7 @@ export const sendPushNotification = runWith({maxInstances: 10})
           (jsonResponse.errors?.length ?? 0) > 0
         ) {
           functions.logger.error("Expo push returned ticket errors", {
-            receiverId,
+            receiverId: normalizedReceiverId,
             failedTickets,
             errors: jsonResponse.errors ?? [],
           });
@@ -131,13 +185,13 @@ export const sendPushNotification = runWith({maxInstances: 10})
         }
 
         functions.logger.info("Expo push sent", {
-          receiverId,
+          receiverId: normalizedReceiverId,
           ticketCount: tickets.length,
           ticketIds: tickets.map((ticket) => ticket.id).filter(Boolean),
         });
       } catch (error) {
         functions.logger.error("Expo push request threw an error", {
-          receiverId,
+          receiverId: normalizedReceiverId,
           error: error instanceof Error ? error.message : String(error),
         });
       }
