@@ -78,13 +78,15 @@ type MessageActionSheetState = {
 
 const MessagingScreen = () => {
   const navigation = useNavigation();
+  const { contactId, contactName } = useLocalSearchParams();
   useEffect(() => {
+    const parsedContactName =
+      typeof contactName === "string" ? contactName.trim() : "";
     navigation.setOptions({
-      title: "Messages",
+      title: parsedContactName || "Messages",
       headerBackTitle: "Contacts",
     });
-  }, [navigation]);
-  const { contactId } = useLocalSearchParams();
+  }, [contactName, navigation]);
   const contactIdValue = String(contactId);
   const currentUserId = getAuth().currentUser?.uid ?? null;
   const [messages, setMessages] = useState<MessageDoc[]>([]);
