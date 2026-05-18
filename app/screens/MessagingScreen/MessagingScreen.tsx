@@ -8,13 +8,15 @@ import {
   useLocalSearchParams,
   useNavigation,
 } from "expo-router";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Platform,
   Pressable,
   ScrollView,
@@ -23,6 +25,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { Swipeable } from "react-native-gesture-handler";
 import { TypingIndicatorDots } from "../../../components/typing-indicator-dots";
 
 import {
@@ -34,13 +37,14 @@ import {
   markConversationRead,
   sendMessage,
   setConversationTyping,
+  setMessageReaction,
   uploadConversationImage,
 } from "../../../api";
 
 import {
   ConversationDoc,
-  MessageImage,
   MessageDoc,
+  MessageImage,
   ReplyReference,
 } from "../../types/firestore";
 
@@ -51,6 +55,7 @@ import styles from "./styles";
 const TYPING_PAUSE_MS = 1500;
 const TYPING_STALE_MS = 5000;
 const MESSAGE_HIGHLIGHT_MS = 1800;
+const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 120;
 const MY_BUBBLE_COLOR = Colors.light.bubbleMe;
 const MY_BUBBLE_GRADIENT_COLORS = [
   smartShade(MY_BUBBLE_COLOR, -5),
@@ -103,6 +108,43 @@ type MessageActionSheetState = {
   message: MessageDoc;
 };
 
+type MessageListItem =
+  | {
+      type: "dayHeader";
+      id: string;
+      label: string;
+    }
+  | {
+      type: "message";
+      id: string;
+      message: MessageDoc;
+    };
+
+const WEEKDAY_LABELS = [
+  "Sun",
+  "Mon",
+  "Tues",
+  "Wed",
+  "Thurs",
+  "Fri",
+  "Sat",
+] as const;
+
+const MONTH_LABELS = [
+  "Jan",
+  "Feb",
+  "Mar",
+  "Apr",
+  "May",
+  "Jun",
+  "Jul",
+  "Aug",
+  "Sep",
+  "Oct",
+  "Nov",
+  "Dec",
+] as const;
+
 const MessagingScreen = () => {
   const navigation = useNavigation();
   const { contactId, contactName } = useLocalSearchParams();
@@ -125,7 +167,9 @@ const MessagingScreen = () => {
     string | null
   >(null);
   const [isOtherPartyTyping, setIsOtherPartyTyping] = useState(false);
-  const flatListRef = useRef<FlatList>(null);
+  const flatListRef = useRef<FlatList<MessageListItem>>(null);
+  const shouldAutoScrollToLatestRef = useRef(true);
+  const forceAutoScrollToLatestRef = useRef(true);
   const inputRef = useRef<TextInput>(null);
   const typingStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -167,6 +211,27 @@ const MessagingScreen = () => {
       highlightTimeoutRef.current = null;
     }
   }, []);
+
+  const scrollToLatestIfNeeded = useCallback((animated: boolean) => {
+    const shouldAutoScroll =
+      forceAutoScrollToLatestRef.current || shouldAutoScrollToLatestRef.current;
+    if (!shouldAutoScroll) {
+      return;
+    }
+    flatListRef.current?.scrollToEnd({ animated });
+    forceAutoScrollToLatestRef.current = false;
+  }, []);
+
+  const handleMessagesScroll = useCallback(
+    ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const distanceFromBottom =
+        nativeEvent.contentSize.height -
+        (nativeEvent.contentOffset.y + nativeEvent.layoutMeasurement.height);
+      shouldAutoScrollToLatestRef.current =
+        distanceFromBottom <= AUTO_SCROLL_BOTTOM_THRESHOLD_PX;
+    },
+    [],
+  );
 
   const syncMyTypingState = useCallback(
     async (isTyping: boolean, targetConversationId?: string) => {
@@ -293,10 +358,9 @@ const MessagingScreen = () => {
                 });
               }
             }
-            setTimeout(
-              () => flatListRef.current?.scrollToEnd({ animated: true }),
-              100,
-            );
+            setTimeout(() => {
+              scrollToLatestIfNeeded(true);
+            }, 100);
           },
         );
       })();
@@ -313,6 +377,8 @@ const MessagingScreen = () => {
         setIsSendingImage(false);
         setMessageActionSheet(null);
         setConversationId(null);
+        shouldAutoScrollToLatestRef.current = true;
+        forceAutoScrollToLatestRef.current = true;
         if (
           activeConversationId &&
           currentUserId &&
@@ -334,6 +400,7 @@ const MessagingScreen = () => {
       clearTypingStopTimeout,
       contactIdValue,
       currentUserId,
+      scrollToLatestIfNeeded,
     ]),
   );
 
@@ -402,7 +469,10 @@ const MessagingScreen = () => {
     try {
       const hasImage = await Clipboard.hasImageAsync();
       if (!hasImage) {
-        Alert.alert("Clipboard has no image", "Copy an image first, then paste.");
+        Alert.alert(
+          "Clipboard has no image",
+          "Copy an image first, then paste.",
+        );
         return;
       }
       const clipboardImage = await Clipboard.getImageAsync({ format: "png" });
@@ -493,40 +563,27 @@ const MessagingScreen = () => {
       void syncMyTypingState(false);
 
       const targetMessage = messageActionSheet.message;
-      const outgoingMessage: Parameters<typeof sendMessage>[1] = {
-        text: emoji,
-        sender: currentUser.uid,
-        receiverId: contactIdValue,
-        timestamp: Date.now(),
-        receiverPushToken,
-      };
-      let senderPushToken = null;
-      try {
-        senderPushToken = await getUserExpoPushToken(currentUser.uid);
-      } catch {}
-      outgoingMessage.senderPushToken = senderPushToken;
-      outgoingMessage.replyTo = {
-        messageId: targetMessage.id,
-        senderId: targetMessage.sender,
-        snippet: makeReplySnippetFromMessage(targetMessage),
-        type: "text",
-      };
+      const existingReaction =
+        targetMessage.reactions?.[currentUser.uid] ?? null;
+      const nextReaction = existingReaction === emoji ? null : emoji;
 
       try {
-        await sendMessage(conversationId, outgoingMessage);
+        await setMessageReaction({
+          conversationId,
+          messageId: targetMessage.id,
+          userId: currentUser.uid,
+          emoji: nextReaction,
+        });
       } catch (error) {
-        console.error("Failed to send quick emoji reply:", error);
+        console.error("Failed to set reaction:", error);
         Alert.alert("Couldn't send reaction. Please try again.");
       }
     },
     [
       clearTypingStopTimeout,
       closeMessageActionSheet,
-      contactIdValue,
       conversationId,
-      makeReplySnippetFromMessage,
       messageActionSheet,
-      receiverPushToken,
       syncMyTypingState,
     ],
   );
@@ -536,6 +593,32 @@ const MessagingScreen = () => {
     closeMessageActionSheet();
     handleReplyToMessage(messageActionSheet.message);
   }, [closeMessageActionSheet, handleReplyToMessage, messageActionSheet]);
+
+  const handleCopyFromActionSheet = useCallback(async () => {
+    if (!messageActionSheet) return;
+
+    const targetMessage = messageActionSheet.message;
+    const textValue =
+      typeof targetMessage.text === "string" ? targetMessage.text : "";
+    const valueToCopy =
+      textValue.trim().length > 0
+        ? textValue
+        : (targetMessage.image?.url ?? "");
+
+    closeMessageActionSheet();
+
+    if (!valueToCopy) {
+      Alert.alert("Nothing to copy");
+      return;
+    }
+
+    try {
+      await Clipboard.setStringAsync(valueToCopy);
+    } catch (error) {
+      console.error("Failed to copy message:", error);
+      Alert.alert("Couldn't copy message. Please try again.");
+    }
+  }, [closeMessageActionSheet, messageActionSheet]);
 
   const handleEditFromActionSheet = useCallback(() => {
     if (
@@ -556,7 +639,10 @@ const MessagingScreen = () => {
     (message: MessageDoc, isMe: boolean) => {
       setMessageActionSheet({
         isMe,
-        canEdit: isMe && typeof message.text === "string" && message.text.trim().length > 0,
+        canEdit:
+          isMe &&
+          typeof message.text === "string" &&
+          message.text.trim().length > 0,
         message,
       });
     },
@@ -578,12 +664,26 @@ const MessagingScreen = () => {
 
   const jumpToOriginalMessage = useCallback(
     (messageId: string) => {
-      const targetIndex = messages.findIndex((msg) => msg.id === messageId);
-      if (targetIndex < 0) {
+      const messageIndex = messages.findIndex((msg) => msg.id === messageId);
+      if (messageIndex < 0) {
         Alert.alert("Original message unavailable");
         return;
       }
 
+      let dayHeaderCount = 0;
+      let lastDayKey: string | null = null;
+      for (let idx = 0; idx <= messageIndex; idx += 1) {
+        const messageDate = new Date(messages[idx].timestamp);
+        const dayKey = `${messageDate.getFullYear()}-${messageDate.getMonth()}-${messageDate.getDate()}`;
+        if (dayKey !== lastDayKey) {
+          dayHeaderCount += 1;
+          lastDayKey = dayKey;
+        }
+      }
+      const targetIndex = messageIndex + dayHeaderCount;
+
+      shouldAutoScrollToLatestRef.current = false;
+      forceAutoScrollToLatestRef.current = false;
       flatListRef.current?.scrollToIndex({
         index: targetIndex,
         animated: true,
@@ -616,6 +716,11 @@ const MessagingScreen = () => {
       void syncMyTypingState(false);
       const currentUser = getAuth().currentUser;
       if (!currentUser?.uid) return;
+      try {
+        await currentUser.getIdToken();
+      } catch (tokenError) {
+        console.warn("Unable to refresh auth token before upload:", tokenError);
+      }
 
       let uploadedImage: MessageImage | undefined;
       if (pendingImage) {
@@ -624,7 +729,8 @@ const MessagingScreen = () => {
           conversationId,
           senderId: currentUser.uid,
           localUri: pendingImage.localUri,
-          dataUri: pendingImage.source === "paste" ? pendingImage.dataUri : undefined,
+          dataUri:
+            pendingImage.source === "paste" ? pendingImage.dataUri : undefined,
           fileName: pendingImage.fileName,
           mimeType: pendingImage.mimeType,
           width: pendingImage.width,
@@ -641,7 +747,11 @@ const MessagingScreen = () => {
       const outgoingMessage: Parameters<typeof sendMessage>[1] = {
         text: messageText.length > 0 ? messageText : undefined,
         image: uploadedImage,
-        kind: uploadedImage ? (messageText.length > 0 ? "mixed" : "image") : "text",
+        kind: uploadedImage
+          ? messageText.length > 0
+            ? "mixed"
+            : "image"
+          : "text",
         sender: currentUser.uid,
         receiverId: contactIdValue,
         timestamp: Date.now(),
@@ -652,6 +762,7 @@ const MessagingScreen = () => {
         outgoingMessage.replyTo = replyingTo;
       }
 
+      forceAutoScrollToLatestRef.current = true;
       await sendMessage(conversationId, outgoingMessage);
       setInput("");
       setReplyingTo(null);
@@ -675,122 +786,314 @@ const MessagingScreen = () => {
     }
   };
 
-  const renderItem = ({ item }: { item: MessageDoc }) => {
-    const isMe = item.sender === getAuth().currentUser?.uid;
-    const isHighlighted = highlightedMessageId === item.id;
-    const replyTo = item.replyTo;
-    const messageText = typeof item.text === "string" ? item.text : "";
+  const formatMessageTime = useCallback((timestamp: number) => {
+    if (!Number.isFinite(timestamp)) return "";
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString([], {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  }, []);
+
+  const getOrdinalDay = useCallback((dayNumber: number) => {
+    const mod100 = dayNumber % 100;
+    if (mod100 >= 11 && mod100 <= 13) {
+      return `${dayNumber}th`;
+    }
+    switch (dayNumber % 10) {
+      case 1:
+        return `${dayNumber}st`;
+      case 2:
+        return `${dayNumber}nd`;
+      case 3:
+        return `${dayNumber}rd`;
+      default:
+        return `${dayNumber}th`;
+    }
+  }, []);
+
+  const getDayHeaderLabel = useCallback(
+    (timestamp: number) => {
+      const date = new Date(timestamp);
+      const weekday = WEEKDAY_LABELS[date.getDay()];
+      const day = getOrdinalDay(date.getDate());
+      const month = MONTH_LABELS[date.getMonth()];
+      return `${weekday} ${day} ${month}`;
+    },
+    [getOrdinalDay],
+  );
+
+  const messageListItems = useMemo(() => {
+    const items: MessageListItem[] = [];
+    let lastDayKey: string | null = null;
+
+    messages.forEach((message) => {
+      const messageDate = new Date(message.timestamp);
+      const dayKey = `${messageDate.getFullYear()}-${messageDate.getMonth()}-${messageDate.getDate()}`;
+
+      if (dayKey !== lastDayKey) {
+        items.push({
+          type: "dayHeader",
+          id: `day-${dayKey}`,
+          label: getDayHeaderLabel(message.timestamp),
+        });
+        lastDayKey = dayKey;
+      }
+
+      items.push({
+        type: "message",
+        id: message.id,
+        message,
+      });
+    });
+
+    return items;
+  }, [getDayHeaderLabel, messages]);
+
+  const renderItem = ({ item }: { item: MessageListItem }) => {
+    if (item.type === "dayHeader") {
+      return (
+        <View style={styles.dayHeaderRow}>
+          <Text style={styles.dayHeaderText}>{item.label}</Text>
+        </View>
+      );
+    }
+
+    const message = item.message;
+    const isMe = message.sender === getAuth().currentUser?.uid;
+    const isHighlighted = highlightedMessageId === message.id;
+    const replyTo = message.replyTo;
+    const messageText = typeof message.text === "string" ? message.text : "";
     const hasText = messageText.trim().length > 0;
-    const messageImage = item.image;
+    const messageImage = message.image;
     const hasImage = Boolean(messageImage?.url);
     const imageAspectRatio =
       messageImage?.width && messageImage?.height && messageImage.height > 0
         ? messageImage.width / messageImage.height
         : 1;
+    const messageTime = formatMessageTime(message.timestamp);
+    const reactionCounts = new Map<string, number>();
+    Object.values(message.reactions ?? {}).forEach((reactionEmoji) => {
+      if (typeof reactionEmoji !== "string") return;
+      const normalizedReaction = reactionEmoji.trim();
+      if (!normalizedReaction) return;
+      reactionCounts.set(
+        normalizedReaction,
+        (reactionCounts.get(normalizedReaction) ?? 0) + 1,
+      );
+    });
+    const reactionBadges = Array.from(reactionCounts.entries()).map(
+      ([reactionEmoji, count]) => ({
+        emoji: reactionEmoji,
+        count,
+      }),
+    );
+    const hasReaction = reactionBadges.length > 0;
     return (
-      <TouchableOpacity
-        onLongPress={() => handleMessageLongPress(item, isMe)}
+      <View
         style={[
-          styles.bubble,
-          isMe ? styles.bubbleMe : styles.bubbleOther,
-          isHighlighted ? styles.bubbleHighlighted : null,
+          styles.messageSwipeRow,
+          isMe ? styles.messageSwipeRowMe : styles.messageSwipeRowOther,
         ]}
-        activeOpacity={0.7}
       >
-        {isMe ? (
-          <LinearGradient
-            colors={MY_BUBBLE_GRADIENT_COLORS}
-            start={{ x: 0.5, y: 0 }}
-            end={{ x: 0.5, y: 1 }}
-            style={styles.bubbleMeGradient}
-            pointerEvents="none"
-          />
-        ) : null}
-        {editingId === item.id ? (
-          <View style={styles.editContainer}>
-            <TextInput
-              value={editingText}
-              onChangeText={setEditingText}
-              style={styles.editInput}
-              multiline
-              textAlignVertical="top"
-              scrollEnabled={false}
-              autoFocus
-            />
-            <View style={styles.editActions}>
-              <TouchableOpacity
-                onPress={handleEditCancel}
-                style={styles.editCancelBtn}
-              >
-                <Text style={styles.editCancelText}>Cancel</Text>
-              </TouchableOpacity>
-              <TouchableOpacity onPress={handleEditSave} style={styles.saveBtn}>
-                <Text style={styles.saveBtnText}>Save</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        ) : (
-          <View style={styles.bubbleContent}>
-            {replyTo ? (
-              <TouchableOpacity
-                onPress={() => jumpToOriginalMessage(replyTo.messageId)}
-                style={[
-                  styles.replyQuote,
-                  isMe ? styles.replyQuoteMe : styles.replyQuoteOther,
-                ]}
-                activeOpacity={0.7}
-              >
-                <Text
-                  style={[
-                    styles.replyQuoteLabel,
-                    isMe
-                      ? styles.replyQuoteLabelMe
-                      : styles.replyQuoteLabelOther,
-                  ]}
-                >
-                  Replying to{" "}
-                  {replyTo.senderId === currentUserId ? "You" : "Them"}
-                </Text>
-                <Text
-                  style={[
-                    styles.replyQuoteText,
-                    isMe ? styles.replyQuoteTextMe : styles.replyQuoteTextOther,
-                  ]}
-                  numberOfLines={2}
-                >
-                  {replyTo.deleted
-                    ? "Original message unavailable"
-                    : replyTo.snippet}
-                </Text>
-              </TouchableOpacity>
+        <Swipeable
+          containerStyle={styles.messageSwipeable}
+          childrenContainerStyle={styles.messageSwipeChildren}
+          overshootLeft={false}
+          overshootRight={false}
+          leftThreshold={36}
+          rightThreshold={36}
+          friction={2}
+          renderLeftActions={
+            isMe
+              ? undefined
+              : () => (
+                  <View
+                    style={[
+                      styles.messageTimestampReveal,
+                      styles.messageTimestampRevealLeft,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.messageTimestampRevealText,
+                        styles.messageTimestampRevealTextLeft,
+                      ]}
+                    >
+                      {messageTime}
+                    </Text>
+                  </View>
+                )
+          }
+          renderRightActions={
+            isMe
+              ? () => (
+                  <View
+                    style={[
+                      styles.messageTimestampReveal,
+                      styles.messageTimestampRevealRight,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.messageTimestampRevealText,
+                        styles.messageTimestampRevealTextRight,
+                      ]}
+                    >
+                      {messageTime}
+                    </Text>
+                  </View>
+                )
+              : undefined
+          }
+        >
+          <TouchableOpacity
+            onLongPress={() => handleMessageLongPress(message, isMe)}
+            style={[
+              styles.bubble,
+              isMe ? styles.bubbleMe : styles.bubbleOther,
+              isHighlighted ? styles.bubbleHighlighted : null,
+              hasReaction ? styles.bubbleReactionOffset : null,
+            ]}
+            activeOpacity={0.7}
+          >
+            {isMe ? (
+              <LinearGradient
+                colors={MY_BUBBLE_GRADIENT_COLORS}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.bubbleMeGradient}
+                pointerEvents="none"
+              />
             ) : null}
-            {hasText ? (
-              <Text
+            {hasReaction ? (
+              <View
                 style={[
-                  styles.bubbleText,
-                  isMe ? styles.bubbleTextMe : styles.bubbleTextOther,
+                  styles.reactionBubbleRow,
+                  isMe
+                    ? styles.reactionBubbleRowMe
+                    : styles.reactionBubbleRowOther,
                 ]}
               >
-                {messageText}
-              </Text>
+                {reactionBadges.map((reactionBadge) => (
+                  <View
+                    key={reactionBadge.emoji}
+                    style={[
+                      styles.reactionBubble,
+                      isMe
+                        ? styles.reactionBubbleMe
+                        : styles.reactionBubbleOther,
+                    ]}
+                  >
+                    <Text style={styles.reactionBubbleEmoji}>
+                      {reactionBadge.emoji}
+                    </Text>
+                    {reactionBadge.count > 1 ? (
+                      <Text style={styles.reactionBubbleCount}>
+                        {reactionBadge.count}
+                      </Text>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
             ) : null}
-            {hasImage ? (
-              <TouchableOpacity
-                activeOpacity={0.85}
-                onPress={() => setViewerImageUri(messageImage?.url ?? null)}
-                style={hasText ? styles.messageImageWrapWithText : null}
-              >
-                <ExpoImage
-                  source={{ uri: messageImage?.url }}
-                  style={[styles.messageImage, { aspectRatio: imageAspectRatio }]}
-                  contentFit="cover"
+            {editingId === message.id ? (
+              <View style={styles.editContainer}>
+                <TextInput
+                  value={editingText}
+                  onChangeText={setEditingText}
+                  style={styles.editInput}
+                  multiline
+                  textAlignVertical="top"
+                  scrollEnabled={false}
+                  autoFocus
                 />
-              </TouchableOpacity>
-            ) : null}
-            {item.edited && hasText ? <Text style={styles.edited}>(edited)</Text> : null}
-          </View>
-        )}
-      </TouchableOpacity>
+                <View style={styles.editActions}>
+                  <TouchableOpacity
+                    onPress={handleEditCancel}
+                    style={styles.editCancelBtn}
+                  >
+                    <Text style={styles.editCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    onPress={handleEditSave}
+                    style={styles.saveBtn}
+                  >
+                    <Text style={styles.saveBtnText}>Save</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <View style={styles.bubbleContent}>
+                {replyTo ? (
+                  <TouchableOpacity
+                    onPress={() => jumpToOriginalMessage(replyTo.messageId)}
+                    style={[
+                      styles.replyQuote,
+                      isMe ? styles.replyQuoteMe : styles.replyQuoteOther,
+                    ]}
+                    activeOpacity={0.7}
+                  >
+                    <Text
+                      style={[
+                        styles.replyQuoteLabel,
+                        isMe
+                          ? styles.replyQuoteLabelMe
+                          : styles.replyQuoteLabelOther,
+                      ]}
+                    >
+                      Replying to{" "}
+                      {replyTo.senderId === currentUserId ? "You" : "Them"}
+                    </Text>
+                    <Text
+                      style={[
+                        styles.replyQuoteText,
+                        isMe
+                          ? styles.replyQuoteTextMe
+                          : styles.replyQuoteTextOther,
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {replyTo.deleted
+                        ? "Original message unavailable"
+                        : replyTo.snippet}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
+                {hasText ? (
+                  <Text
+                    style={[
+                      styles.bubbleText,
+                      isMe ? styles.bubbleTextMe : styles.bubbleTextOther,
+                    ]}
+                  >
+                    {messageText}
+                  </Text>
+                ) : null}
+                {hasImage ? (
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => setViewerImageUri(messageImage?.url ?? null)}
+                    style={hasText ? styles.messageImageWrapWithText : null}
+                  >
+                    <ExpoImage
+                      source={{ uri: messageImage?.url }}
+                      style={[
+                        styles.messageImage,
+                        { aspectRatio: imageAspectRatio },
+                      ]}
+                      contentFit="cover"
+                    />
+                  </TouchableOpacity>
+                ) : null}
+                {message.edited && hasText ? (
+                  <Text style={styles.edited}>(edited)</Text>
+                ) : null}
+              </View>
+            )}
+          </TouchableOpacity>
+        </Swipeable>
+      </View>
     );
   };
 
@@ -806,8 +1109,10 @@ const MessagingScreen = () => {
       <View style={[styles.container, { flex: 1 }]}>
         <FlatList
           ref={flatListRef}
-          data={messages}
+          data={messageListItems}
           renderItem={renderItem}
+          onScroll={handleMessagesScroll}
+          scrollEventThrottle={16}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
           onScrollToIndexFailed={({ index, averageItemLength }) => {
@@ -838,9 +1143,7 @@ const MessagingScreen = () => {
               </View>
             ) : null
           }
-          onContentSizeChange={() =>
-            flatListRef.current?.scrollToEnd({ animated: true })
-          }
+          onContentSizeChange={() => scrollToLatestIfNeeded(true)}
         />
         <View style={styles.composerContainer}>
           {replyingTo ? (
@@ -970,6 +1273,14 @@ const MessagingScreen = () => {
               onPress={handleReplyFromActionSheet}
             >
               <Text style={styles.messageActionSheetRowText}>Reply</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.messageActionSheetRow}
+              onPress={() => {
+                void handleCopyFromActionSheet();
+              }}
+            >
+              <Text style={styles.messageActionSheetRowText}>Copy</Text>
             </TouchableOpacity>
             {messageActionSheet?.isMe && messageActionSheet.canEdit ? (
               <TouchableOpacity

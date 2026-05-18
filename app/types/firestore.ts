@@ -27,6 +27,10 @@ export type MessageImage = {
   sizeBytes?: number;
 };
 
+export type MessageReactions = {
+  [userId: string]: string;
+};
+
 export type MessageDoc = {
   id: string;
   text?: string;
@@ -36,6 +40,7 @@ export type MessageDoc = {
   receiverId: string;
   timestamp: number;
   replyTo?: ReplyReference;
+  reactions?: MessageReactions;
   edited?: boolean;
   receiverPushToken?: string | null;
   senderPushToken?: string | null;

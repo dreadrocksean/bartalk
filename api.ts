@@ -283,14 +283,6 @@ const getDownloadURLWithRetry = async (
     : new Error("Failed to resolve uploaded image URL");
 };
 
-const awaitUploadTask = async (
-  task: ReturnType<ReturnType<ReturnType<typeof getStorage>["ref"]>["putString"]>,
-) => {
-  await new Promise((resolve, reject) => {
-    task.then(resolve).catch(reject);
-  });
-};
-
 const toGsUrl = (bucket: string) =>
   bucket.startsWith("gs://") ? bucket : `gs://${bucket}`;
 
@@ -374,23 +366,19 @@ export const uploadConversationImage = async (
   ) => {
     if (localUri) {
       try {
-        await awaitUploadTask(
-          imageRef.putFile(
-            localUri,
-            metadata,
-          ),
+        await imageRef.putFile(
+          localUri,
+          metadata,
         );
       } catch (error) {
         if (!dataUri) {
           throw error;
         }
         const base64 = toBase64(dataUri);
-        await awaitUploadTask(
-          imageRef.putString(
-            base64,
-            "base64",
-            metadata,
-          ),
+        await imageRef.putString(
+          base64,
+          "base64",
+          metadata,
         );
       }
       return;
@@ -398,12 +386,10 @@ export const uploadConversationImage = async (
 
     if (dataUri) {
       const base64 = toBase64(dataUri);
-      await awaitUploadTask(
-        imageRef.putString(
-          base64,
-          "base64",
-          metadata,
-        ),
+      await imageRef.putString(
+        base64,
+        "base64",
+        metadata,
       );
     }
   };
@@ -449,6 +435,31 @@ export const editMessage = (
     messageId,
   );
   return updateDoc(messageDoc, { text: newText, edited: true });
+};
+
+export const setMessageReaction = ({
+  conversationId,
+  messageId,
+  userId,
+  emoji,
+}: {
+  conversationId: string;
+  messageId: string;
+  userId: string;
+  emoji: string | null;
+}) => {
+  const messageDoc = doc(
+    getDb(),
+    "conversations",
+    conversationId,
+    "messages",
+    messageId,
+  );
+
+  return updateDoc(messageDoc, {
+    [`reactions.${userId}`]:
+      emoji === null ? firestore.FieldValue.delete() : emoji,
+  });
 };
 
 export const deleteMessage = (conversationId: string, messageId: string) => {
