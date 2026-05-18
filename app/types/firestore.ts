@@ -15,9 +15,23 @@ export type UserDoc = {
   lastSignIn?: FirebaseFirestoreTypes.Timestamp;
 };
 
+export type MessageKind = "text" | "image" | "mixed";
+
+export type MessageImage = {
+  url: string;
+  storagePath: string;
+  width?: number;
+  height?: number;
+  mimeType?: string;
+  fileName?: string;
+  sizeBytes?: number;
+};
+
 export type MessageDoc = {
   id: string;
-  text: string;
+  text?: string;
+  kind?: MessageKind;
+  image?: MessageImage;
   sender: string;
   receiverId: string;
   timestamp: number;

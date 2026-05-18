@@ -34,7 +34,11 @@ type ContactsScreenProps = {
 
 type Message = {
   id: string;
-  text: string;
+  text?: string;
+  kind?: "text" | "image" | "mixed";
+  image?: {
+    url: string;
+  };
   sender: string;
   timestamp: number;
 };
@@ -108,6 +112,16 @@ const ContactsScreen: FC<ContactsScreenProps> = ({ user }) => {
               ? {
                   id: data.lastMessage.id ?? "",
                   text: data.lastMessage.text ?? "",
+                  kind:
+                    data.lastMessage.kind === "image" ||
+                    data.lastMessage.kind === "mixed"
+                      ? data.lastMessage.kind
+                      : "text",
+                  image:
+                    data.lastMessage.image &&
+                    typeof data.lastMessage.image.url === "string"
+                      ? { url: data.lastMessage.image.url }
+                      : undefined,
                   sender: data.lastMessage.sender ?? "",
                   timestamp: data.lastMessage.timestamp ?? 0,
                 }
@@ -175,7 +189,16 @@ const ContactsScreen: FC<ContactsScreenProps> = ({ user }) => {
           c.participants.includes(item.id),
       );
       const lastMsg = convo?.lastMessage;
-      let lastMsgText = lastMsg?.text ?? "";
+      const lastMsgHasImage = Boolean(lastMsg?.image?.url);
+      const lastMsgTextRaw = (lastMsg?.text ?? "").trim();
+      let lastMsgText = "";
+      if (lastMsgHasImage && lastMsgTextRaw) {
+        lastMsgText = `📷 ${lastMsgTextRaw}`;
+      } else if (lastMsgHasImage) {
+        lastMsgText = "📷 Photo";
+      } else {
+        lastMsgText = lastMsgTextRaw;
+      }
       if (lastMsgText.length > 120)
         lastMsgText = lastMsgText.slice(0, 120) + "...";
       // Format as 2-line snippet

@@ -15,6 +15,7 @@ export default StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     flexDirection: "row",
     alignItems: "center",
+    position: "relative",
   },
   bubbleContent: {
     flexShrink: 1,
@@ -28,6 +29,11 @@ export default StyleSheet.create({
   bubbleMe: {
     alignSelf: "flex-end",
     backgroundColor: Colors.light.bubbleMe,
+    borderBottomRightRadius: 6,
+  },
+  bubbleMeGradient: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 22,
     borderBottomRightRadius: 6,
   },
   bubbleOther: {
@@ -55,6 +61,14 @@ export default StyleSheet.create({
     marginLeft: 6,
     alignSelf: "flex-end",
   },
+  messageImageWrapWithText: {
+    marginTop: 8,
+  },
+  messageImage: {
+    width: 220,
+    borderRadius: 14,
+    backgroundColor: "rgba(0, 0, 0, 0.06)",
+  },
   replyQuote: {
     borderRadius: 10,
     borderLeftWidth: 3,
@@ -63,8 +77,8 @@ export default StyleSheet.create({
     marginBottom: 8,
   },
   replyQuoteMe: {
-    backgroundColor: "rgba(255, 255, 255, 0.16)",
-    borderLeftColor: "rgba(255, 255, 255, 0.85)",
+    backgroundColor: "rgba(107, 68, 37, 0.14)",
+    borderLeftColor: "#A56D3D",
   },
   replyQuoteOther: {
     backgroundColor: "rgba(0, 0, 0, 0.04)",
@@ -76,7 +90,7 @@ export default StyleSheet.create({
     marginBottom: 2,
   },
   replyQuoteLabelMe: {
-    color: "rgba(255, 255, 255, 0.95)",
+    color: "#5F371A",
   },
   replyQuoteLabelOther: {
     color: "#374151",
@@ -85,7 +99,7 @@ export default StyleSheet.create({
     fontSize: 13,
   },
   replyQuoteTextMe: {
-    color: "rgba(255, 255, 255, 0.9)",
+    color: "#4A2E18",
   },
   replyQuoteTextOther: {
     color: "#111827",
@@ -145,6 +159,22 @@ export default StyleSheet.create({
     padding: 12,
     backgroundColor: "#f9f9f9",
   },
+  attachBtn: {
+    height: 34,
+    width: 34,
+    borderRadius: 17,
+    backgroundColor: "#E5E7EB",
+    alignItems: "center",
+    justifyContent: "center",
+    marginRight: 8,
+  },
+  attachBtnText: {
+    color: "#374151",
+    fontWeight: "700",
+    fontSize: 20,
+    lineHeight: 20,
+    marginTop: -2,
+  },
   input: {
     flex: 1,
     height: 40,
@@ -156,17 +186,106 @@ export default StyleSheet.create({
     borderWidth: 1,
     borderColor: "#e5e5ea",
   },
+  pendingImageComposer: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 4,
+  },
+  pendingImageThumb: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+  },
+  pendingImageMetaWrap: {
+    flex: 1,
+    marginLeft: 10,
+  },
+  pendingImageMetaText: {
+    color: "#374151",
+    fontSize: 13,
+    fontWeight: "500",
+  },
+  pendingImageRemoveBtn: {
+    marginLeft: 10,
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#E5E7EB",
+  },
+  pendingImageRemoveText: {
+    color: "#4B5563",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  editContainer: {
+    width: "100%",
+  },
+  editInput: {
+    width: "100%",
+    minHeight: 44,
+    maxHeight: 180,
+    borderRadius: 14,
+    backgroundColor: "#fff",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    fontSize: 16,
+    lineHeight: 22,
+    borderWidth: 1,
+    borderColor: "#d1d5db",
+    color: Colors.light.bubbleTextOther,
+  },
+  editActions: {
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    marginTop: 8,
+  },
+  editCancelBtn: {
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    marginRight: 8,
+    backgroundColor: "rgba(0, 0, 0, 0.07)",
+  },
+  editCancelText: {
+    color: "#374151",
+    fontWeight: "600",
+    fontSize: 13,
+  },
   sendBtn: {
     backgroundColor: "#007AFF",
     borderRadius: 20,
     paddingHorizontal: 18,
     paddingVertical: 8,
   },
+  sendBtnDisabled: {
+    opacity: 0.5,
+  },
   saveBtn: {
-    backgroundColor: "#e5e5ea",
+    backgroundColor: "#0A84FF",
     borderRadius: 16,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 6,
+  },
+  saveBtnText: {
+    color: "#fff",
+    fontWeight: "600",
+    fontSize: 13,
+  },
+  imageViewerBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(0, 0, 0, 0.86)",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 40,
+  },
+  imageViewerImage: {
+    width: "100%",
+    height: "100%",
   },
   messageActionSheetOverlay: {
     flex: 1,

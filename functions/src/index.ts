@@ -105,8 +105,19 @@ export const sendPushNotification = runWith({maxInstances: 10})
         return null;
       }
 
-      const text = String(message.text || "You have a new message");
-      const body = text.length > 100 ? `${text.slice(0, 97)}...` : text;
+      const hasImage = Boolean(message.image?.url);
+      const text =
+        typeof message.text === "string" ? message.text.trim() : "";
+      const resolvedKind =
+        typeof message.kind === "string" ? message.kind :
+          hasImage && text.length > 0 ? "mixed" :
+          hasImage ? "image" :
+          "text";
+      const defaultBody = hasImage ? "📷 Photo" : "You have a new message";
+      const rawBody =
+        text.length > 0 ? hasImage ? `📷 ${text}` : text : defaultBody;
+      const body =
+        rawBody.length > 100 ? `${rawBody.slice(0, 97)}...` : rawBody;
       const replyToMessageId =
         typeof message.replyTo?.messageId === "string" ?
           message.replyTo.messageId :
@@ -116,12 +127,14 @@ export const sendPushNotification = runWith({maxInstances: 10})
         senderId: string;
         receiverId: string;
         messageId: string;
+        messageKind: string;
         replyToMessageId?: string;
       } = {
         conversationId: context.params.conversationId,
         senderId,
         receiverId: normalizedReceiverId,
         messageId: context.params.messageId,
+        messageKind: resolvedKind,
       };
       if (replyToMessageId) {
         payloadData.replyToMessageId = replyToMessageId;
@@ -131,7 +144,11 @@ export const sendPushNotification = runWith({maxInstances: 10})
         to: expoPushToken,
         sound: "default",
         channelId: ANDROID_NOTIFICATION_CHANNEL_ID,
-        title: replyToMessageId ? "New reply" : "New message",
+        title: replyToMessageId ?
+          "New reply" :
+          hasImage ?
+            "New photo" :
+            "New message",
         body,
         data: payloadData,
       };

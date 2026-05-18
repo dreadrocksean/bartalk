@@ -14,13 +14,18 @@ import firestore, {
   updateDoc,
 } from "@react-native-firebase/firestore";
 import { Alert } from "react-native";
-import type { ReplyReference } from "./app/types/firestore";
-import { getFirebaseDb } from "./firebase";
+import type {
+  MessageImage,
+  MessageKind,
+  ReplyReference,
+} from "./app/types/firestore";
+import { getFirebaseDb, getFirebaseStorage } from "./firebase";
 
 // ***************************//
 // -----------Setup-----------//
 // ***************************//
 export const getDb = () => getFirebaseDb();
+export const getStorage = (bucketUrl?: string) => getFirebaseStorage(bucketUrl);
 
 const getConversationsRef = () => collection(getDb(), "conversations");
 // ***************************//
@@ -152,17 +157,57 @@ export const listenForMessages = (
   });
 };
 
+export type SendMessageInput = {
+  text?: string;
+  kind?: MessageKind;
+  image?: MessageImage;
+  sender: string;
+  timestamp: number;
+  receiverId: string;
+  replyTo?: ReplyReference;
+  receiverPushToken?: string | null;
+  senderPushToken?: string | null;
+};
+
+const resolveMessageKind = (message: SendMessageInput): MessageKind => {
+  const hasText = typeof message.text === "string" && message.text.trim().length > 0;
+  const hasImage = Boolean(message.image?.url);
+  if (hasText && hasImage) return "mixed";
+  if (hasImage) return "image";
+  return "text";
+};
+
+const buildMessagePayload = (
+  message: SendMessageInput,
+): FirebaseFirestoreTypes.DocumentData => {
+  const payload: FirebaseFirestoreTypes.DocumentData = {
+    sender: message.sender,
+    timestamp: message.timestamp,
+    receiverId: message.receiverId,
+    kind: message.kind ?? resolveMessageKind(message),
+  };
+
+  if (typeof message.text === "string") {
+    payload.text = message.text;
+  }
+  if (message.image) {
+    payload.image = message.image;
+  }
+  if (message.replyTo) {
+    payload.replyTo = message.replyTo;
+  }
+  if (message.receiverPushToken !== undefined) {
+    payload.receiverPushToken = message.receiverPushToken;
+  }
+  if (message.senderPushToken !== undefined) {
+    payload.senderPushToken = message.senderPushToken;
+  }
+  return payload;
+};
+
 export const sendMessage = async (
   conversationId: string,
-  message: {
-    text: string;
-    sender: string;
-    timestamp: number;
-    receiverId: string;
-    replyTo?: ReplyReference;
-    receiverPushToken?: string | null;
-    senderPushToken?: string | null;
-  },
+  message: SendMessageInput,
 ) => {
   try {
     const messagesRef = collection(
@@ -171,16 +216,224 @@ export const sendMessage = async (
       conversationId,
       "messages",
     );
-    const docRef = await addDoc(messagesRef, message);
+    const payload = buildMessagePayload(message);
+    const docRef = await addDoc(messagesRef, payload);
     console.log("Document written with ID: ", docRef.id);
     // Optionally update lastMessage on conversation
     const convoDoc = doc(getDb(), "conversations", conversationId);
-    await updateDoc(convoDoc, { lastMessage: { ...message, id: docRef.id } });
+    await updateDoc(convoDoc, { lastMessage: { ...payload, id: docRef.id } });
   } catch (error) {
     Alert.alert("Failed to send message. Please try again.");
     console.error("Error adding document: ", error);
     throw error;
   }
+};
+
+type UploadConversationImageInput = {
+  conversationId: string;
+  senderId: string;
+  localUri?: string;
+  dataUri?: string;
+  fileName?: string;
+  mimeType?: string;
+  width?: number;
+  height?: number;
+  sizeBytes?: number;
+};
+
+const wait = (ms: number) =>
+  new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+
+const isStorageObjectNotFoundError = (error: unknown): boolean => {
+  if (!error || typeof error !== "object") return false;
+  const code =
+    "code" in error && typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : "";
+  const message =
+    "message" in error &&
+    typeof (error as { message?: unknown }).message === "string"
+      ? (error as { message: string }).message
+      : "";
+  return code.includes("storage/object-not-found") || message.includes("storage/object-not-found");
+};
+
+const getDownloadURLWithRetry = async (
+  imageRef: ReturnType<ReturnType<typeof getStorage>["ref"]>,
+): Promise<string> => {
+  const retryDelaysMs = [200, 500, 900];
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= retryDelaysMs.length; attempt++) {
+    try {
+      return await imageRef.getDownloadURL();
+    } catch (error) {
+      lastError = error;
+      if (!isStorageObjectNotFoundError(error) || attempt === retryDelaysMs.length) {
+        throw error;
+      }
+      await wait(retryDelaysMs[attempt]);
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("Failed to resolve uploaded image URL");
+};
+
+const awaitUploadTask = async (
+  task: ReturnType<ReturnType<ReturnType<typeof getStorage>["ref"]>["putString"]>,
+) => {
+  await new Promise((resolve, reject) => {
+    task.then(resolve).catch(reject);
+  });
+};
+
+const toGsUrl = (bucket: string) =>
+  bucket.startsWith("gs://") ? bucket : `gs://${bucket}`;
+
+const getAlternateBucketUrl = (): string | null => {
+  const configuredBucket = getStorage().app.options.storageBucket;
+  if (typeof configuredBucket !== "string" || configuredBucket.trim().length === 0) {
+    return null;
+  }
+
+  const bucket = configuredBucket.trim().replace(/^gs:\/\//, "");
+  if (bucket.endsWith(".firebasestorage.app")) {
+    return toGsUrl(bucket.replace(".firebasestorage.app", ".appspot.com"));
+  }
+  if (bucket.endsWith(".appspot.com")) {
+    return toGsUrl(bucket.replace(".appspot.com", ".firebasestorage.app"));
+  }
+  return null;
+};
+
+const MIME_TO_EXTENSION: Record<string, string> = {
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "image/heif": "heif",
+};
+
+const resolveImageExtension = (
+  fileName?: string,
+  mimeType?: string,
+  localUri?: string,
+): string => {
+  if (mimeType && MIME_TO_EXTENSION[mimeType.toLowerCase()]) {
+    return MIME_TO_EXTENSION[mimeType.toLowerCase()];
+  }
+  const source = fileName ?? localUri ?? "";
+  const extensionMatch = source.match(/\.([a-zA-Z0-9]+)(?:\?|$)/);
+  if (extensionMatch?.[1]) {
+    return extensionMatch[1].toLowerCase();
+  }
+  return "jpg";
+};
+
+const toBase64 = (dataUriOrBase64: string): string => {
+  const marker = "base64,";
+  const markerIndex = dataUriOrBase64.indexOf(marker);
+  if (markerIndex === -1) {
+    return dataUriOrBase64;
+  }
+  return dataUriOrBase64.slice(markerIndex + marker.length);
+};
+
+export const uploadConversationImage = async (
+  input: UploadConversationImageInput,
+): Promise<MessageImage> => {
+  const {
+    conversationId,
+    senderId,
+    localUri,
+    dataUri,
+    fileName,
+    mimeType,
+    width,
+    height,
+    sizeBytes,
+  } = input;
+
+  if (!localUri && !dataUri) {
+    throw new Error("Missing image source for upload");
+  }
+
+  const extension = resolveImageExtension(fileName, mimeType, localUri);
+  const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  const storagePath =
+    `conversations/${conversationId}/images/${senderId}/${uniqueSuffix}.${extension}`;
+  const metadata = mimeType ? {contentType: mimeType} : undefined;
+
+  const uploadToRef = async (
+    imageRef: ReturnType<ReturnType<typeof getStorage>["ref"]>,
+  ) => {
+    if (localUri) {
+      try {
+        await awaitUploadTask(
+          imageRef.putFile(
+            localUri,
+            metadata,
+          ),
+        );
+      } catch (error) {
+        if (!dataUri) {
+          throw error;
+        }
+        const base64 = toBase64(dataUri);
+        await awaitUploadTask(
+          imageRef.putString(
+            base64,
+            "base64",
+            metadata,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (dataUri) {
+      const base64 = toBase64(dataUri);
+      await awaitUploadTask(
+        imageRef.putString(
+          base64,
+          "base64",
+          metadata,
+        ),
+      );
+    }
+  };
+
+  let imageRef = getStorage().ref(storagePath);
+  try {
+    await uploadToRef(imageRef);
+  } catch (error) {
+    const alternateBucketUrl = getAlternateBucketUrl();
+    const canRetryWithAlternateBucket =
+      isStorageObjectNotFoundError(error) && Boolean(alternateBucketUrl);
+
+    if (!canRetryWithAlternateBucket || !alternateBucketUrl) {
+      throw error;
+    }
+
+    imageRef = getStorage(alternateBucketUrl).ref(storagePath);
+    await uploadToRef(imageRef);
+  }
+
+  const url = await getDownloadURLWithRetry(imageRef);
+  return {
+    url,
+    storagePath,
+    width,
+    height,
+    mimeType,
+    fileName,
+    sizeBytes,
+  };
 };
 
 export const editMessage = (
@@ -221,9 +474,7 @@ type UserProfileData = {
 
 const normalizeUserProfileData = (data: UserProfileData) => {
   const normalized: UserProfileData = {};
-  const entries = Object.entries(data) as Array<
-    [keyof UserProfileData, string | undefined]
-  >;
+  const entries = Object.entries(data) as [keyof UserProfileData, string | undefined][];
 
   for (const [key, value] of entries) {
     if (typeof value !== "string") continue;

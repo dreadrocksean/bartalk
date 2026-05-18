@@ -41,6 +41,12 @@
       "expo-router",
       "expo-dev-client",
       "expo-notifications",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "BarTalk needs access to your photos so you can send images in chat."
+        }
+      ],
       "expo-apple-authentication",
       [
         "expo-build-properties",

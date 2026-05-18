@@ -5,11 +5,11 @@
 
 import { Platform } from "react-native";
 
-// iMessage blue and gray
+// iMessage gray and BarTalk gold accent
 const iMessageBlue = "#007AFF";
 const iMessageGray = "#e5e5ea";
 const iMessageDarkBlue = "#0a2540";
-const tintColorLight = iMessageBlue;
+const barTalkBubbleBottom = "#ecd0a6";
 const tintColorDark = "#fff";
 
 export const Colors = {
@@ -20,9 +20,9 @@ export const Colors = {
     icon: "#687076",
     tabIconDefault: "#687076",
     tabIconSelected: iMessageBlue,
-    bubbleMe: iMessageBlue,
+    bubbleMe: barTalkBubbleBottom,
     bubbleOther: "#fff",
-    bubbleTextMe: "#fff",
+    bubbleTextMe: "#2F1D10",
     bubbleTextOther: "#222",
     inputBar: "#f9f9f9",
     border: iMessageGray,
