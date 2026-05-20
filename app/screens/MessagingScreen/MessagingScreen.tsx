@@ -1,8 +1,6 @@
 import { getAuth } from "@react-native-firebase/auth";
 import * as Clipboard from "expo-clipboard";
-import { Image as ExpoImage } from "expo-image";
 import * as ImagePicker from "expo-image-picker";
-import { LinearGradient } from "expo-linear-gradient";
 import {
   useFocusEffect,
   useLocalSearchParams,
@@ -14,26 +12,23 @@ import {
   FlatList,
   Keyboard,
   KeyboardAvoidingView,
-  Modal,
   NativeScrollEvent,
   NativeSyntheticEvent,
   Platform,
-  Pressable,
-  ScrollView,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from "react-native";
-import { Swipeable } from "react-native-gesture-handler";
 import { TypingIndicatorDots } from "../../../components/typing-indicator-dots";
 
+import type { MessagesPageCursor } from "../../../api";
 import {
   editMessage,
+  fetchOlderMessagesPage,
   getOrCreateConversation,
   getUserExpoPushToken,
   listenForConversation,
-  listenForMessages,
+  listenForRecentMessages,
   markConversationRead,
   sendMessage,
   setConversationTyping,
@@ -45,109 +40,42 @@ import {
   ConversationDoc,
   MessageDoc,
   MessageImage,
-  ReplyReference,
 } from "../../types/firestore";
+import type {
+  MessageActionSheetState,
+  MessageListItem,
+  PendingImage,
+  ReplyTarget,
+  SwipeAutoCloseTimeoutsMap,
+  TopLoadAnchor,
+} from "./types";
 
-import { smartShade } from "@/app/utils/colorUtils";
-import { Colors } from "../../../constants/theme";
+import {
+  AUTO_SCROLL_BOTTOM_THRESHOLD_PX,
+  LOAD_OLDER_THROTTLE_MS,
+  LOAD_OLDER_TOP_THRESHOLD_PX,
+  MESSAGE_HIGHLIGHT_MS,
+  MESSAGES_PAGE_SIZE,
+  SWIPE_AUTO_CLOSE_MS,
+  TYPING_PAUSE_MS,
+  TYPING_STALE_MS,
+} from "./constants";
+import { DayHeaderRow } from "./components/DayHeaderRow";
+import { ImageViewerModal } from "./components/ImageViewerModal";
+import { MessageActionSheetModal } from "./components/MessageActionSheetModal";
+import { MessageComposer } from "./components/MessageComposer";
+import { MessageRow } from "./components/MessageRow";
 import styles from "./styles";
-
-const TYPING_PAUSE_MS = 1500;
-const TYPING_STALE_MS = 5000;
-const MESSAGE_HIGHLIGHT_MS = 1800;
-const AUTO_SCROLL_BOTTOM_THRESHOLD_PX = 120;
-const MY_BUBBLE_COLOR = Colors.light.bubbleMe;
-const MY_BUBBLE_GRADIENT_COLORS = [
-  smartShade(MY_BUBBLE_COLOR, -5),
-  MY_BUBBLE_COLOR,
-] as const;
-const QUICK_REPLY_EMOJIS = [
-  "❤️",
-  "👍",
-  "👎",
-  "😂",
-  "🔥",
-  "😮",
-  "??",
-  "🙏",
-  "😍",
-  "👏",
-  "😭",
-  "🙌",
-  "🤔",
-  "😅",
-  "🎉",
-  "✅",
-  "👀",
-  "💯",
-  "🤝",
-  "😎",
-] as const;
-
-type ReplyTarget = Required<
-  Pick<ReplyReference, "messageId" | "senderId" | "snippet">
-> & {
-  type: "text";
-};
-
-type PendingImage = {
-  source: "picker" | "paste";
-  previewUri: string;
-  localUri?: string;
-  dataUri?: string;
-  width?: number;
-  height?: number;
-  fileName?: string;
-  mimeType?: string;
-  sizeBytes?: number;
-};
-
-type MessageActionSheetState = {
-  isMe: boolean;
-  canEdit: boolean;
-  message: MessageDoc;
-};
-
-type MessageListItem =
-  | {
-      type: "dayHeader";
-      id: string;
-      label: string;
-    }
-  | {
-      type: "message";
-      id: string;
-      message: MessageDoc;
-    };
-
-const WEEKDAY_LABELS = [
-  "Sun",
-  "Mon",
-  "Tues",
-  "Wed",
-  "Thurs",
-  "Fri",
-  "Sat",
-] as const;
-
-const MONTH_LABELS = [
-  "Jan",
-  "Feb",
-  "Mar",
-  "Apr",
-  "May",
-  "Jun",
-  "Jul",
-  "Aug",
-  "Sep",
-  "Oct",
-  "Nov",
-  "Dec",
-] as const;
+import {
+  buildMessageListItems,
+  formatMessageTime,
+  mergeMessagesChronologically,
+} from "./utils";
 
 const MessagingScreen = () => {
   const navigation = useNavigation();
   const { contactId, contactName } = useLocalSearchParams();
+
   useEffect(() => {
     const parsedContactName =
       typeof contactName === "string" ? contactName.trim() : "";
@@ -156,9 +84,13 @@ const MessagingScreen = () => {
       headerBackTitle: "Contacts",
     });
   }, [contactName, navigation]);
+
   const contactIdValue = String(contactId);
   const currentUserId = getAuth().currentUser?.uid ?? null;
-  const [messages, setMessages] = useState<MessageDoc[]>([]);
+  const [recentMessages, setRecentMessages] = useState<MessageDoc[]>([]);
+  const [olderMessages, setOlderMessages] = useState<MessageDoc[]>([]);
+  const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
+  const [hasOlderMessages, setHasOlderMessages] = useState(false);
   const [input, setInput] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState("");
@@ -170,6 +102,14 @@ const MessagingScreen = () => {
   const flatListRef = useRef<FlatList<MessageListItem>>(null);
   const shouldAutoScrollToLatestRef = useRef(true);
   const forceAutoScrollToLatestRef = useRef(true);
+  const isInitialAutoPinActiveRef = useRef(true);
+  const hasUserScrolledRef = useRef(false);
+  const canTriggerTopLoadRef = useRef(true);
+  const topLoadAnchorRef = useRef<TopLoadAnchor | null>(null);
+  const lastScrollOffsetYRef = useRef(0);
+  const oldestMessageCursorRef = useRef<MessagesPageCursor | null>(null);
+  const isLoadingOlderMessagesRef = useRef(false);
+  const lastOlderLoadAttemptAtRef = useRef(0);
   const inputRef = useRef<TextInput>(null);
   const typingStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -181,6 +121,10 @@ const MessagingScreen = () => {
     typeof setTimeout
   > | null>(null);
   const isCurrentUserTypingRef = useRef(false);
+  const swipeAutoCloseTimeoutsRef = useRef<SwipeAutoCloseTimeoutsMap>(
+    new Map(),
+  );
+
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [receiverPushToken, setReceiverPushToken] = useState<string | null>(
     null,
@@ -212,6 +156,39 @@ const MessagingScreen = () => {
     }
   }, []);
 
+  const clearSwipeAutoCloseTimeout = useCallback((messageId: string) => {
+    const timeoutHandle = swipeAutoCloseTimeoutsRef.current.get(messageId);
+    if (!timeoutHandle) {
+      return;
+    }
+    clearTimeout(timeoutHandle);
+    swipeAutoCloseTimeoutsRef.current.delete(messageId);
+  }, []);
+
+  const clearAllSwipeAutoCloseTimeouts = useCallback(() => {
+    swipeAutoCloseTimeoutsRef.current.forEach((timeoutHandle) => {
+      clearTimeout(timeoutHandle);
+    });
+    swipeAutoCloseTimeoutsRef.current.clear();
+  }, []);
+
+  const scheduleSwipeAutoClose = useCallback(
+    (messageId: string, swipeable: { close: () => void }) => {
+      clearSwipeAutoCloseTimeout(messageId);
+      const timeoutHandle = setTimeout(() => {
+        swipeable.close();
+        clearSwipeAutoCloseTimeout(messageId);
+      }, SWIPE_AUTO_CLOSE_MS);
+      swipeAutoCloseTimeoutsRef.current.set(messageId, timeoutHandle);
+    },
+    [clearSwipeAutoCloseTimeout],
+  );
+
+  const messages = useMemo(
+    () => mergeMessagesChronologically(olderMessages, recentMessages),
+    [olderMessages, recentMessages],
+  );
+
   const scrollToLatestIfNeeded = useCallback((animated: boolean) => {
     const shouldAutoScroll =
       forceAutoScrollToLatestRef.current || shouldAutoScrollToLatestRef.current;
@@ -222,16 +199,149 @@ const MessagingScreen = () => {
     forceAutoScrollToLatestRef.current = false;
   }, []);
 
+  const loadOlderMessages = useCallback(async () => {
+    if (
+      !conversationId ||
+      !hasOlderMessages ||
+      isLoadingOlderMessagesRef.current
+    ) {
+      return;
+    }
+    const cursor = oldestMessageCursorRef.current;
+    if (!cursor) {
+      setHasOlderMessages(false);
+      return;
+    }
+
+    isLoadingOlderMessagesRef.current = true;
+    setIsLoadingOlderMessages(true);
+
+    try {
+      const page = await fetchOlderMessagesPage({
+        conversationId,
+        pageSize: MESSAGES_PAGE_SIZE,
+        oldestCursor: cursor,
+      });
+      oldestMessageCursorRef.current = page.oldestCursor;
+      setHasOlderMessages(page.hasMore);
+      if (page.messages.length > 0) {
+        setOlderMessages((current) =>
+          mergeMessagesChronologically(current, page.messages as MessageDoc[]),
+        );
+      } else {
+        topLoadAnchorRef.current = null;
+      }
+    } catch (error) {
+      console.error("Failed to load older messages:", error);
+      topLoadAnchorRef.current = null;
+    } finally {
+      isLoadingOlderMessagesRef.current = false;
+      setIsLoadingOlderMessages(false);
+    }
+  }, [conversationId, hasOlderMessages]);
+
   const handleMessagesScroll = useCallback(
     ({ nativeEvent }: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const currentOffsetY = nativeEvent.contentOffset.y;
+      const isScrollingTowardTop =
+        currentOffsetY < lastScrollOffsetYRef.current - 0.5;
+      lastScrollOffsetYRef.current = currentOffsetY;
+
       const distanceFromBottom =
         nativeEvent.contentSize.height -
-        (nativeEvent.contentOffset.y + nativeEvent.layoutMeasurement.height);
+        (currentOffsetY + nativeEvent.layoutMeasurement.height);
       shouldAutoScrollToLatestRef.current =
         distanceFromBottom <= AUTO_SCROLL_BOTTOM_THRESHOLD_PX;
+
+      if (!hasUserScrolledRef.current && currentOffsetY > 2) {
+        hasUserScrolledRef.current = true;
+        isInitialAutoPinActiveRef.current = false;
+        shouldAutoScrollToLatestRef.current = false;
+        forceAutoScrollToLatestRef.current = false;
+      }
+
+      if (!hasUserScrolledRef.current) {
+        return;
+      }
+
+      if (
+        isScrollingTowardTop &&
+        currentOffsetY <= LOAD_OLDER_TOP_THRESHOLD_PX &&
+        canTriggerTopLoadRef.current
+      ) {
+        const now = Date.now();
+        if (now - lastOlderLoadAttemptAtRef.current >= LOAD_OLDER_THROTTLE_MS) {
+          lastOlderLoadAttemptAtRef.current = now;
+          canTriggerTopLoadRef.current = false;
+          const stopOffset = Math.max(0, currentOffsetY);
+          topLoadAnchorRef.current = {
+            offsetY: stopOffset,
+            contentHeight: nativeEvent.contentSize.height,
+          };
+          requestAnimationFrame(() => {
+            flatListRef.current?.scrollToOffset({
+              offset: stopOffset,
+              animated: false,
+            });
+          });
+          void loadOlderMessages();
+        }
+      }
     },
-    [],
+    [loadOlderMessages],
   );
+
+  const handleContentSizeChange = useCallback(
+    (_width: number, contentHeight: number) => {
+      const topLoadAnchor = topLoadAnchorRef.current;
+      if (topLoadAnchor) {
+        const deltaHeight = contentHeight - topLoadAnchor.contentHeight;
+        if (Math.abs(deltaHeight) > 0.5) {
+          const anchoredOffset = Math.max(
+            0,
+            topLoadAnchor.offsetY + deltaHeight,
+          );
+          topLoadAnchor.offsetY = anchoredOffset;
+          topLoadAnchor.contentHeight = contentHeight;
+          requestAnimationFrame(() => {
+            flatListRef.current?.scrollToOffset({
+              offset: anchoredOffset,
+              animated: false,
+            });
+          });
+        } else {
+          topLoadAnchor.contentHeight = contentHeight;
+        }
+        if (!isLoadingOlderMessagesRef.current) {
+          topLoadAnchorRef.current = null;
+        }
+        return;
+      }
+
+      if (isInitialAutoPinActiveRef.current && !hasUserScrolledRef.current) {
+        forceAutoScrollToLatestRef.current = true;
+        flatListRef.current?.scrollToEnd({ animated: false });
+        requestAnimationFrame(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+        });
+        return;
+      }
+      if (hasUserScrolledRef.current && !forceAutoScrollToLatestRef.current) {
+        return;
+      }
+      scrollToLatestIfNeeded(true);
+    },
+    [scrollToLatestIfNeeded],
+  );
+
+  const handleMessagesScrollBeginDrag = useCallback(() => {
+    hasUserScrolledRef.current = true;
+    isInitialAutoPinActiveRef.current = false;
+    shouldAutoScrollToLatestRef.current = false;
+    forceAutoScrollToLatestRef.current = false;
+    canTriggerTopLoadRef.current = true;
+    topLoadAnchorRef.current = null;
+  }, []);
 
   const syncMyTypingState = useCallback(
     async (isTyping: boolean, targetConversationId?: string) => {
@@ -298,6 +408,19 @@ const MessagingScreen = () => {
       let activeConversationId: string | null = null;
       let unsubscribeMessages: (() => void) | null = null;
       let unsubscribeConversation: (() => void) | null = null;
+      isInitialAutoPinActiveRef.current = true;
+      hasUserScrolledRef.current = false;
+      canTriggerTopLoadRef.current = true;
+      clearAllSwipeAutoCloseTimeouts();
+      topLoadAnchorRef.current = null;
+      lastScrollOffsetYRef.current = 0;
+      oldestMessageCursorRef.current = null;
+      isLoadingOlderMessagesRef.current = false;
+      lastOlderLoadAttemptAtRef.current = 0;
+      setRecentMessages([]);
+      setOlderMessages([]);
+      setHasOlderMessages(false);
+      setIsLoadingOlderMessages(false);
       (async () => {
         const currentUser = getAuth().currentUser;
         if (!currentUser) return;
@@ -341,13 +464,35 @@ const MessagingScreen = () => {
           },
         );
 
-        unsubscribeMessages = listenForMessages(
+        unsubscribeMessages = listenForRecentMessages(
           convoRef.id,
-          async (msgs: MessageDoc[]) => {
+          MESSAGES_PAGE_SIZE,
+          async (page) => {
             if (!isActive) return;
-            setMessages(msgs.sort((a, b) => a.timestamp - b.timestamp));
-            if (msgs.length > 0) {
-              const lastMsg = msgs[msgs.length - 1];
+            const recentPageMessages = (page.messages as MessageDoc[]).sort(
+              (a, b) => a.timestamp - b.timestamp,
+            );
+
+            setRecentMessages((previousRecent) => {
+              const incomingIds = new Set(
+                recentPageMessages.map((message) => message.id),
+              );
+              const evictedMessages = previousRecent.filter(
+                (message) => !incomingIds.has(message.id),
+              );
+              if (evictedMessages.length > 0) {
+                setOlderMessages((previousOlder) =>
+                  mergeMessagesChronologically(previousOlder, evictedMessages),
+                );
+              }
+              return recentPageMessages;
+            });
+
+            oldestMessageCursorRef.current = page.oldestCursor;
+            setHasOlderMessages(page.hasMore);
+
+            if (recentPageMessages.length > 0) {
+              const lastMsg = recentPageMessages[recentPageMessages.length - 1];
               if (lastMsg.sender && lastMsg.sender !== currentUser.uid) {
                 await markConversationRead({
                   conversationId: convoRef.id,
@@ -358,9 +503,15 @@ const MessagingScreen = () => {
                 });
               }
             }
-            setTimeout(() => {
+            requestAnimationFrame(() => {
+              if (
+                hasUserScrolledRef.current &&
+                !forceAutoScrollToLatestRef.current
+              ) {
+                return;
+              }
               scrollToLatestIfNeeded(true);
-            }, 100);
+            });
           },
         );
       })();
@@ -369,6 +520,7 @@ const MessagingScreen = () => {
         clearTypingStopTimeout();
         clearRemoteTypingExpiryTimeout();
         clearHighlightTimeout();
+        clearAllSwipeAutoCloseTimeouts();
         setIsOtherPartyTyping(false);
         setReplyingTo(null);
         setHighlightedMessageId(null);
@@ -377,8 +529,20 @@ const MessagingScreen = () => {
         setIsSendingImage(false);
         setMessageActionSheet(null);
         setConversationId(null);
+        setRecentMessages([]);
+        setOlderMessages([]);
+        setHasOlderMessages(false);
+        setIsLoadingOlderMessages(false);
         shouldAutoScrollToLatestRef.current = true;
         forceAutoScrollToLatestRef.current = true;
+        isInitialAutoPinActiveRef.current = true;
+        hasUserScrolledRef.current = false;
+        canTriggerTopLoadRef.current = true;
+        topLoadAnchorRef.current = null;
+        lastScrollOffsetYRef.current = 0;
+        oldestMessageCursorRef.current = null;
+        isLoadingOlderMessagesRef.current = false;
+        lastOlderLoadAttemptAtRef.current = 0;
         if (
           activeConversationId &&
           currentUserId &&
@@ -395,6 +559,7 @@ const MessagingScreen = () => {
         if (unsubscribeMessages) unsubscribeMessages();
       };
     }, [
+      clearAllSwipeAutoCloseTimeouts,
       clearRemoteTypingExpiryTimeout,
       clearHighlightTimeout,
       clearTypingStopTimeout,
@@ -684,6 +849,10 @@ const MessagingScreen = () => {
 
       shouldAutoScrollToLatestRef.current = false;
       forceAutoScrollToLatestRef.current = false;
+      isInitialAutoPinActiveRef.current = false;
+      hasUserScrolledRef.current = true;
+      canTriggerTopLoadRef.current = false;
+      topLoadAnchorRef.current = null;
       flatListRef.current?.scrollToIndex({
         index: targetIndex,
         animated: true,
@@ -786,314 +955,30 @@ const MessagingScreen = () => {
     }
   };
 
-  const formatMessageTime = useCallback((timestamp: number) => {
-    if (!Number.isFinite(timestamp)) return "";
-    const date = new Date(timestamp);
-    return date.toLocaleTimeString([], {
-      hour: "numeric",
-      minute: "2-digit",
-    });
-  }, []);
-
-  const getOrdinalDay = useCallback((dayNumber: number) => {
-    const mod100 = dayNumber % 100;
-    if (mod100 >= 11 && mod100 <= 13) {
-      return `${dayNumber}th`;
-    }
-    switch (dayNumber % 10) {
-      case 1:
-        return `${dayNumber}st`;
-      case 2:
-        return `${dayNumber}nd`;
-      case 3:
-        return `${dayNumber}rd`;
-      default:
-        return `${dayNumber}th`;
-    }
-  }, []);
-
-  const getDayHeaderLabel = useCallback(
-    (timestamp: number) => {
-      const date = new Date(timestamp);
-      const weekday = WEEKDAY_LABELS[date.getDay()];
-      const day = getOrdinalDay(date.getDate());
-      const month = MONTH_LABELS[date.getMonth()];
-      return `${weekday} ${day} ${month}`;
-    },
-    [getOrdinalDay],
-  );
-
-  const messageListItems = useMemo(() => {
-    const items: MessageListItem[] = [];
-    let lastDayKey: string | null = null;
-
-    messages.forEach((message) => {
-      const messageDate = new Date(message.timestamp);
-      const dayKey = `${messageDate.getFullYear()}-${messageDate.getMonth()}-${messageDate.getDate()}`;
-
-      if (dayKey !== lastDayKey) {
-        items.push({
-          type: "dayHeader",
-          id: `day-${dayKey}`,
-          label: getDayHeaderLabel(message.timestamp),
-        });
-        lastDayKey = dayKey;
-      }
-
-      items.push({
-        type: "message",
-        id: message.id,
-        message,
-      });
-    });
-
-    return items;
-  }, [getDayHeaderLabel, messages]);
+  const messageListItems = useMemo(() => buildMessageListItems(messages), [messages]);
 
   const renderItem = ({ item }: { item: MessageListItem }) => {
     if (item.type === "dayHeader") {
-      return (
-        <View style={styles.dayHeaderRow}>
-          <Text style={styles.dayHeaderText}>{item.label}</Text>
-        </View>
-      );
+      return <DayHeaderRow label={item.label} />;
     }
 
-    const message = item.message;
-    const isMe = message.sender === getAuth().currentUser?.uid;
-    const isHighlighted = highlightedMessageId === message.id;
-    const replyTo = message.replyTo;
-    const messageText = typeof message.text === "string" ? message.text : "";
-    const hasText = messageText.trim().length > 0;
-    const messageImage = message.image;
-    const hasImage = Boolean(messageImage?.url);
-    const imageAspectRatio =
-      messageImage?.width && messageImage?.height && messageImage.height > 0
-        ? messageImage.width / messageImage.height
-        : 1;
-    const messageTime = formatMessageTime(message.timestamp);
-    const reactionCounts = new Map<string, number>();
-    Object.values(message.reactions ?? {}).forEach((reactionEmoji) => {
-      if (typeof reactionEmoji !== "string") return;
-      const normalizedReaction = reactionEmoji.trim();
-      if (!normalizedReaction) return;
-      reactionCounts.set(
-        normalizedReaction,
-        (reactionCounts.get(normalizedReaction) ?? 0) + 1,
-      );
-    });
-    const reactionBadges = Array.from(reactionCounts.entries()).map(
-      ([reactionEmoji, count]) => ({
-        emoji: reactionEmoji,
-        count,
-      }),
-    );
-    const hasReaction = reactionBadges.length > 0;
     return (
-      <View
-        style={[
-          styles.messageSwipeRow,
-          isMe ? styles.messageSwipeRowMe : styles.messageSwipeRowOther,
-        ]}
-      >
-        <Swipeable
-          containerStyle={styles.messageSwipeable}
-          childrenContainerStyle={styles.messageSwipeChildren}
-          overshootLeft={false}
-          overshootRight={false}
-          leftThreshold={36}
-          rightThreshold={36}
-          friction={2}
-          renderLeftActions={
-            isMe
-              ? undefined
-              : () => (
-                  <View
-                    style={[
-                      styles.messageTimestampReveal,
-                      styles.messageTimestampRevealLeft,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.messageTimestampRevealText,
-                        styles.messageTimestampRevealTextLeft,
-                      ]}
-                    >
-                      {messageTime}
-                    </Text>
-                  </View>
-                )
-          }
-          renderRightActions={
-            isMe
-              ? () => (
-                  <View
-                    style={[
-                      styles.messageTimestampReveal,
-                      styles.messageTimestampRevealRight,
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.messageTimestampRevealText,
-                        styles.messageTimestampRevealTextRight,
-                      ]}
-                    >
-                      {messageTime}
-                    </Text>
-                  </View>
-                )
-              : undefined
-          }
-        >
-          <TouchableOpacity
-            onLongPress={() => handleMessageLongPress(message, isMe)}
-            style={[
-              styles.bubble,
-              isMe ? styles.bubbleMe : styles.bubbleOther,
-              isHighlighted ? styles.bubbleHighlighted : null,
-              hasReaction ? styles.bubbleReactionOffset : null,
-            ]}
-            activeOpacity={0.7}
-          >
-            {isMe ? (
-              <LinearGradient
-                colors={MY_BUBBLE_GRADIENT_COLORS}
-                start={{ x: 0.5, y: 0 }}
-                end={{ x: 0.5, y: 1 }}
-                style={styles.bubbleMeGradient}
-                pointerEvents="none"
-              />
-            ) : null}
-            {hasReaction ? (
-              <View
-                style={[
-                  styles.reactionBubbleRow,
-                  isMe
-                    ? styles.reactionBubbleRowMe
-                    : styles.reactionBubbleRowOther,
-                ]}
-              >
-                {reactionBadges.map((reactionBadge) => (
-                  <View
-                    key={reactionBadge.emoji}
-                    style={[
-                      styles.reactionBubble,
-                      isMe
-                        ? styles.reactionBubbleMe
-                        : styles.reactionBubbleOther,
-                    ]}
-                  >
-                    <Text style={styles.reactionBubbleEmoji}>
-                      {reactionBadge.emoji}
-                    </Text>
-                    {reactionBadge.count > 1 ? (
-                      <Text style={styles.reactionBubbleCount}>
-                        {reactionBadge.count}
-                      </Text>
-                    ) : null}
-                  </View>
-                ))}
-              </View>
-            ) : null}
-            {editingId === message.id ? (
-              <View style={styles.editContainer}>
-                <TextInput
-                  value={editingText}
-                  onChangeText={setEditingText}
-                  style={styles.editInput}
-                  multiline
-                  textAlignVertical="top"
-                  scrollEnabled={false}
-                  autoFocus
-                />
-                <View style={styles.editActions}>
-                  <TouchableOpacity
-                    onPress={handleEditCancel}
-                    style={styles.editCancelBtn}
-                  >
-                    <Text style={styles.editCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    onPress={handleEditSave}
-                    style={styles.saveBtn}
-                  >
-                    <Text style={styles.saveBtnText}>Save</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            ) : (
-              <View style={styles.bubbleContent}>
-                {replyTo ? (
-                  <TouchableOpacity
-                    onPress={() => jumpToOriginalMessage(replyTo.messageId)}
-                    style={[
-                      styles.replyQuote,
-                      isMe ? styles.replyQuoteMe : styles.replyQuoteOther,
-                    ]}
-                    activeOpacity={0.7}
-                  >
-                    <Text
-                      style={[
-                        styles.replyQuoteLabel,
-                        isMe
-                          ? styles.replyQuoteLabelMe
-                          : styles.replyQuoteLabelOther,
-                      ]}
-                    >
-                      Replying to{" "}
-                      {replyTo.senderId === currentUserId ? "You" : "Them"}
-                    </Text>
-                    <Text
-                      style={[
-                        styles.replyQuoteText,
-                        isMe
-                          ? styles.replyQuoteTextMe
-                          : styles.replyQuoteTextOther,
-                      ]}
-                      numberOfLines={2}
-                    >
-                      {replyTo.deleted
-                        ? "Original message unavailable"
-                        : replyTo.snippet}
-                    </Text>
-                  </TouchableOpacity>
-                ) : null}
-                {hasText ? (
-                  <Text
-                    style={[
-                      styles.bubbleText,
-                      isMe ? styles.bubbleTextMe : styles.bubbleTextOther,
-                    ]}
-                  >
-                    {messageText}
-                  </Text>
-                ) : null}
-                {hasImage ? (
-                  <TouchableOpacity
-                    activeOpacity={0.85}
-                    onPress={() => setViewerImageUri(messageImage?.url ?? null)}
-                    style={hasText ? styles.messageImageWrapWithText : null}
-                  >
-                    <ExpoImage
-                      source={{ uri: messageImage?.url }}
-                      style={[
-                        styles.messageImage,
-                        { aspectRatio: imageAspectRatio },
-                      ]}
-                      contentFit="cover"
-                    />
-                  </TouchableOpacity>
-                ) : null}
-                {message.edited && hasText ? (
-                  <Text style={styles.edited}>(edited)</Text>
-                ) : null}
-              </View>
-            )}
-          </TouchableOpacity>
-        </Swipeable>
-      </View>
+      <MessageRow
+        message={item.message}
+        currentUserId={currentUserId}
+        highlightedMessageId={highlightedMessageId}
+        editingId={editingId}
+        editingText={editingText}
+        onEditingTextChange={setEditingText}
+        onMessageLongPress={handleMessageLongPress}
+        onSwipeOpen={scheduleSwipeAutoClose}
+        onSwipeClose={clearSwipeAutoCloseTimeout}
+        onJumpToOriginalMessage={jumpToOriginalMessage}
+        onEditCancel={handleEditCancel}
+        onEditSave={handleEditSave}
+        onViewerImageUriChange={setViewerImageUri}
+        formatMessageTime={formatMessageTime}
+      />
     );
   };
 
@@ -1112,6 +997,7 @@ const MessagingScreen = () => {
           data={messageListItems}
           renderItem={renderItem}
           onScroll={handleMessagesScroll}
+          onScrollBeginDrag={handleMessagesScrollBeginDrag}
           scrollEventThrottle={16}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
@@ -1143,162 +1029,45 @@ const MessagingScreen = () => {
               </View>
             ) : null
           }
-          onContentSizeChange={() => scrollToLatestIfNeeded(true)}
+          ListHeaderComponent={
+            isLoadingOlderMessages ? (
+              <View style={styles.dayHeaderRow}>
+                <Text style={styles.dayHeaderText}>
+                  Loading older messages...
+                </Text>
+              </View>
+            ) : null
+          }
+          onContentSizeChange={handleContentSizeChange}
         />
-        <View style={styles.composerContainer}>
-          {replyingTo ? (
-            <View style={styles.replyComposer}>
-              <View style={styles.replyComposerTextWrap}>
-                <Text style={styles.replyComposerLabel}>
-                  Replying to{" "}
-                  {replyingTo.senderId === currentUserId ? "You" : "Them"}
-                </Text>
-                <Text style={styles.replyComposerText} numberOfLines={1}>
-                  {replyingTo.snippet}
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setReplyingTo(null)}
-                style={styles.replyComposerClose}
-              >
-                <Text style={styles.replyComposerCloseText}>x</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-          {pendingImage ? (
-            <View style={styles.pendingImageComposer}>
-              <TouchableOpacity
-                onPress={() => setViewerImageUri(pendingImage.previewUri)}
-                activeOpacity={0.85}
-              >
-                <ExpoImage
-                  source={{ uri: pendingImage.previewUri }}
-                  style={styles.pendingImageThumb}
-                  contentFit="cover"
-                />
-              </TouchableOpacity>
-              <View style={styles.pendingImageMetaWrap}>
-                <Text style={styles.pendingImageMetaText}>Image attached</Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setPendingImage(null)}
-                style={styles.pendingImageRemoveBtn}
-              >
-                <Text style={styles.pendingImageRemoveText}>x</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-          <View style={styles.inputBar}>
-            <TouchableOpacity
-              style={styles.attachBtn}
-              onPress={() => {
-                void openImageAttachmentActions();
-              }}
-            >
-              <Text style={styles.attachBtnText}>+</Text>
-            </TouchableOpacity>
-            <TextInput
-              ref={inputRef}
-              style={styles.input}
-              value={input}
-              onChangeText={handleInputChange}
-              placeholder="iMessage"
-              placeholderTextColor="#aaa"
-              onSubmitEditing={handleSend}
-              returnKeyType="send"
-            />
-            <TouchableOpacity
-              onPress={handleSend}
-              style={[styles.sendBtn, !canSend ? styles.sendBtnDisabled : null]}
-              disabled={!canSend}
-            >
-              <Text style={{ color: "#fff", fontWeight: "600", fontSize: 16 }}>
-                {isSendingImage ? "Sending..." : "Send"}
-              </Text>
-            </TouchableOpacity>
-          </View>
-        </View>
+        <MessageComposer
+          currentUserId={currentUserId}
+          replyingTo={replyingTo}
+          onClearReplyingTo={() => setReplyingTo(null)}
+          pendingImage={pendingImage}
+          onOpenViewerImage={(uri) => setViewerImageUri(uri)}
+          onClearPendingImage={() => setPendingImage(null)}
+          inputRef={inputRef}
+          input={input}
+          onInputChange={handleInputChange}
+          onOpenImageAttachmentActions={openImageAttachmentActions}
+          onSend={handleSend}
+          canSend={canSend}
+          isSendingImage={isSendingImage}
+        />
       </View>
-      <Modal
-        visible={Boolean(viewerImageUri)}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setViewerImageUri(null)}
-      >
-        <Pressable
-          style={styles.imageViewerBackdrop}
-          onPress={() => setViewerImageUri(null)}
-        >
-          {viewerImageUri ? (
-            <ExpoImage
-              source={{ uri: viewerImageUri }}
-              style={styles.imageViewerImage}
-              contentFit="contain"
-            />
-          ) : null}
-        </Pressable>
-      </Modal>
-      <Modal
-        visible={Boolean(messageActionSheet)}
-        transparent
-        animationType="fade"
-        onRequestClose={closeMessageActionSheet}
-      >
-        <View style={styles.messageActionSheetOverlay}>
-          <Pressable
-            style={styles.messageActionSheetBackdrop}
-            onPress={closeMessageActionSheet}
-          />
-          <View style={styles.messageActionSheetCard}>
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              style={styles.messageActionSheetEmojiScroll}
-              contentContainerStyle={styles.messageActionSheetEmojiRow}
-            >
-              {QUICK_REPLY_EMOJIS.map((emoji) => (
-                <TouchableOpacity
-                  key={emoji}
-                  style={styles.messageActionSheetEmojiButton}
-                  onPress={() => void handleQuickEmojiReply(emoji)}
-                >
-                  <Text style={styles.messageActionSheetEmojiText}>
-                    {emoji}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-            <TouchableOpacity
-              style={styles.messageActionSheetRow}
-              onPress={handleReplyFromActionSheet}
-            >
-              <Text style={styles.messageActionSheetRowText}>Reply</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={styles.messageActionSheetRow}
-              onPress={() => {
-                void handleCopyFromActionSheet();
-              }}
-            >
-              <Text style={styles.messageActionSheetRowText}>Copy</Text>
-            </TouchableOpacity>
-            {messageActionSheet?.isMe && messageActionSheet.canEdit ? (
-              <TouchableOpacity
-                style={styles.messageActionSheetRow}
-                onPress={handleEditFromActionSheet}
-              >
-                <Text style={styles.messageActionSheetRowText}>Edit</Text>
-              </TouchableOpacity>
-            ) : null}
-            <TouchableOpacity
-              style={styles.messageActionSheetRow}
-              onPress={closeMessageActionSheet}
-            >
-              <Text style={styles.messageActionSheetCancelText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
+      <ImageViewerModal
+        viewerImageUri={viewerImageUri}
+        onClose={() => setViewerImageUri(null)}
+      />
+      <MessageActionSheetModal
+        messageActionSheet={messageActionSheet}
+        onClose={closeMessageActionSheet}
+        onQuickEmojiReply={handleQuickEmojiReply}
+        onReply={handleReplyFromActionSheet}
+        onCopy={handleCopyFromActionSheet}
+        onEdit={handleEditFromActionSheet}
+      />
     </KeyboardAvoidingView>
   );
 };

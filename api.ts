@@ -8,9 +8,11 @@ import firestore, {
   type FirebaseFirestoreTypes,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
+  startAfter,
   updateDoc,
 } from "@react-native-firebase/firestore";
 import { Alert } from "react-native";
@@ -155,6 +157,86 @@ export const listenForMessages = (
     );
     callback(messages);
   });
+};
+
+export type MessagesPageCursor = FirebaseFirestoreTypes.QueryDocumentSnapshot;
+
+export type MessagesPageResult = {
+  messages: any[];
+  oldestCursor: MessagesPageCursor | null;
+  hasMore: boolean;
+};
+
+export const listenForRecentMessages = (
+  conversationId: string,
+  pageSize: number,
+  callback: (page: MessagesPageResult) => void,
+) => {
+  const messagesRef = collection(
+    getDb(),
+    "conversations",
+    conversationId,
+    "messages",
+  );
+  const q = query(messagesRef, orderBy("timestamp", "desc"), limit(pageSize));
+  return onSnapshot(q, (snapshot) => {
+    const docs = snapshot.docs;
+    const messages = docs
+      .map((doc: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({
+        id: doc.id,
+        ...doc.data(),
+      }))
+      .reverse();
+
+    callback({
+      messages,
+      oldestCursor: docs.length > 0 ? docs[docs.length - 1] : null,
+      hasMore: docs.length === pageSize,
+    });
+  });
+};
+
+export const fetchOlderMessagesPage = async ({
+  conversationId,
+  pageSize,
+  oldestCursor,
+}: {
+  conversationId: string;
+  pageSize: number;
+  oldestCursor: MessagesPageCursor | null;
+}): Promise<MessagesPageResult> => {
+  if (!oldestCursor) {
+    return {
+      messages: [],
+      oldestCursor: null,
+      hasMore: false,
+    };
+  }
+
+  const messagesRef = collection(
+    getDb(),
+    "conversations",
+    conversationId,
+    "messages",
+  );
+  const q = query(
+    messagesRef,
+    orderBy("timestamp", "desc"),
+    startAfter(oldestCursor),
+    limit(pageSize),
+  );
+  const snapshot = await getDocs(q);
+  const docs = snapshot.docs;
+  return {
+    messages: docs
+      .map((messageDoc: FirebaseFirestoreTypes.QueryDocumentSnapshot) => ({
+        id: messageDoc.id,
+        ...messageDoc.data(),
+      }))
+      .reverse(),
+    oldestCursor: docs.length > 0 ? docs[docs.length - 1] : oldestCursor,
+    hasMore: docs.length === pageSize,
+  };
 };
 
 export type SendMessageInput = {
