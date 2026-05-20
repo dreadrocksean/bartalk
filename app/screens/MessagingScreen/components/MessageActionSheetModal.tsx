@@ -10,6 +10,7 @@ type MessageActionSheetModalProps = {
   onReply: () => void;
   onCopy: () => void | Promise<void>;
   onEdit: () => void;
+  onDelete: () => void;
 };
 
 export const MessageActionSheetModal = ({
@@ -19,6 +20,7 @@ export const MessageActionSheetModal = ({
   onReply,
   onCopy,
   onEdit,
+  onDelete,
 }: MessageActionSheetModalProps) => {
   return (
     <Modal
@@ -60,6 +62,11 @@ export const MessageActionSheetModal = ({
           {messageActionSheet?.isMe && messageActionSheet.canEdit ? (
             <TouchableOpacity style={styles.messageActionSheetRow} onPress={onEdit}>
               <Text style={styles.messageActionSheetRowText}>Edit</Text>
+            </TouchableOpacity>
+          ) : null}
+          {messageActionSheet?.isMe ? (
+            <TouchableOpacity style={styles.messageActionSheetRow} onPress={onDelete}>
+              <Text style={styles.messageActionSheetDeleteText}>Delete</Text>
             </TouchableOpacity>
           ) : null}
           <TouchableOpacity style={styles.messageActionSheetRow} onPress={onClose}>

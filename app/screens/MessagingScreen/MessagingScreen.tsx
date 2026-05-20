@@ -23,6 +23,7 @@ import { TypingIndicatorDots } from "../../../components/typing-indicator-dots";
 
 import type { MessagesPageCursor } from "../../../api";
 import {
+  deleteMessage,
   editMessage,
   fetchOlderMessagesPage,
   getOrCreateConversation,
@@ -800,6 +801,46 @@ const MessagingScreen = () => {
     );
   }, [closeMessageActionSheet, handleEdit, messageActionSheet]);
 
+  const handleDeleteFromActionSheet = useCallback(() => {
+    if (!conversationId || !messageActionSheet || !messageActionSheet.isMe) {
+      return;
+    }
+
+    const targetMessageId = messageActionSheet.message.id;
+    closeMessageActionSheet();
+
+    Alert.alert("Delete message?", "This action can't be undone.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => {
+          void (async () => {
+            try {
+              await deleteMessage(conversationId, targetMessageId);
+              setRecentMessages((current) =>
+                current.filter((message) => message.id !== targetMessageId),
+              );
+              setOlderMessages((current) =>
+                current.filter((message) => message.id !== targetMessageId),
+              );
+              if (editingId === targetMessageId) {
+                setEditingId(null);
+                setEditingText("");
+              }
+              setReplyingTo((current) =>
+                current?.messageId === targetMessageId ? null : current,
+              );
+            } catch (error) {
+              console.error("Failed to delete message:", error);
+              Alert.alert("Couldn't delete message. Please try again.");
+            }
+          })();
+        },
+      },
+    ]);
+  }, [closeMessageActionSheet, conversationId, editingId, messageActionSheet]);
+
   const handleMessageLongPress = useCallback(
     (message: MessageDoc, isMe: boolean) => {
       setMessageActionSheet({
@@ -1067,6 +1108,7 @@ const MessagingScreen = () => {
         onReply={handleReplyFromActionSheet}
         onCopy={handleCopyFromActionSheet}
         onEdit={handleEditFromActionSheet}
+        onDelete={handleDeleteFromActionSheet}
       />
     </KeyboardAvoidingView>
   );

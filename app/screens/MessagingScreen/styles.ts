@@ -449,6 +449,11 @@ export default StyleSheet.create({
     color: "#111827",
     fontWeight: "500",
   },
+  messageActionSheetDeleteText: {
+    fontSize: unity * 16,
+    color: "#DC2626",
+    fontWeight: "600",
+  },
   messageActionSheetCancelText: {
     fontSize: unity * 16,
     color: "#DC2626",
