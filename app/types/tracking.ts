@@ -38,10 +38,16 @@ export type TrackingLinkKind = "friend" | "dependant";
  * while someone who needs out gets out.
  *
  * The delay is a genuine trade-off, not a solved problem. Shorter, and a child
- * escapes supervision before a parent can respond. Longer, and a person in a
- * bad situation waits with their guardian knowing they asked.
+ * goes dark before a parent can respond. Longer, and someone in a bad situation
+ * waits while the person controlling them knows they asked to leave.
+ *
+ * A day covers what the parent case actually needs — notice it, and have the
+ * conversation, including one overnight. Past that the containment value
+ * flattens, because a dependant who truly wants out can delete the app or
+ * revoke location permission in Settings and always could. What protects the
+ * guardian here is being told immediately, not the length of the wait.
  */
-export const DEPENDANT_RELEASE_DELAY_MS = 172_800_000; // 48 hours
+export const DEPENDANT_RELEASE_DELAY_MS = 86_400_000; // 24 hours
 
 export type TrackingLinkDoc = {
   id: string;

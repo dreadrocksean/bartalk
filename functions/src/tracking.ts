@@ -313,7 +313,7 @@ export const onTrackingLinkWrite = runWith({maxInstances: 10})
         const effectiveAt =
           typeof after.releaseEffectiveAt === "number" ?
             after.releaseEffectiveAt :
-            after.releaseRequestedAt + 172_800_000;
+            after.releaseRequestedAt + 86_400_000;
         const hours = Math.max(
           1,
           Math.round((effectiveAt - Date.now()) / 3_600_000),

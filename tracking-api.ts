@@ -18,7 +18,10 @@ import {
 } from "@react-native-firebase/firestore";
 
 import { getApp } from "@react-native-firebase/app";
-import { getAuth } from "@react-native-firebase/auth";
+import {
+  getFunctions,
+  httpsCallable,
+} from "@react-native-firebase/functions";
 
 import {
   DEPENDANT_RELEASE_DELAY_MS,
@@ -476,43 +479,21 @@ export const fetchTrackingContacts = async (
 // ***************************//
 
 /**
- * Callables are reached over plain HTTPS rather than through
- * @react-native-firebase/functions on purpose. That package is a native module,
- * so adding it would move the build fingerprint — and this whole feature would
- * then be stranded behind a new binary instead of shipping over the air. The
- * callable protocol is a POST with an ID token and a `data` envelope, which
- * fetch does perfectly well.
+ * Guardianship is created server-side and nowhere else, so these two calls are
+ * the whole client surface for establishing it. A tracker cannot write a
+ * dependant link directly — firestore.rules lets a client create friendships
+ * only — which is what stops anyone declaring another person their dependant.
  */
 const callFunction = async <T>(
   name: string,
   payload: Record<string, unknown> = {},
 ): Promise<T> => {
-  const user = getAuth().currentUser;
-  if (!user) throw new Error("You need to be signed in.");
-
-  const projectId = getApp().options.projectId;
-  const token = await user.getIdToken();
-
-  const response = await fetch(
-    `https://us-central1-${projectId}.cloudfunctions.net/${name}`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify({ data: payload }),
-    },
+  const callable = httpsCallable<Record<string, unknown>, T>(
+    getFunctions(getApp()),
+    name,
   );
-
-  const body = (await response.json()) as {
-    result?: T;
-    error?: { message?: string };
-  };
-  if (!response.ok || body.error) {
-    throw new Error(body.error?.message ?? "That didn't work. Try again.");
-  }
-  return body.result as T;
+  const result = await callable(payload);
+  return result.data;
 };
 
 /**

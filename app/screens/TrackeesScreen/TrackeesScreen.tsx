@@ -8,6 +8,7 @@ import { useTrackingEvents } from "../../../hooks/use-tracking-events";
 import { useUnreadCounts } from "../../../hooks/use-unread-counts";
 import { useWatchScope } from "../../../hooks/use-watch-scope";
 import {
+  requestRelease,
   requestTrackingLink,
   respondToTrackingLink,
   revokeTrackingLink,
@@ -20,6 +21,10 @@ import { useTracking } from "../../../tracking/tracking-provider";
 import type { TrackingLinkDoc } from "../../types/tracking";
 import { AskToFollowModal } from "./components/AskToFollowModal";
 import { PersonRow } from "./components/PersonRow";
+import { AddDependantModal } from "./components/AddDependantModal";
+import { AddMenu } from "./components/AddMenu";
+import { EnterPairingCodeModal } from "./components/EnterPairingCodeModal";
+import { GuardianRow } from "./components/GuardianRow";
 import { RowButton } from "./components/RowButton";
 import styles from "./styles";
 
@@ -36,6 +41,19 @@ const TrackeesScreen = () => {
   const events = useTrackingEvents(userId);
   const { counts: unreadCounts } = useUnreadCounts(userId);
   const [isPickerVisible, setIsPickerVisible] = useState(false);
+  const [isMenuVisible, setIsMenuVisible] = useState(false);
+  const [isDependantVisible, setIsDependantVisible] = useState(false);
+  const [isCodeVisible, setIsCodeVisible] = useState(false);
+
+  // Guardianship is a property of the link, so which side of it you are on
+  // decides what you can do — not who you are.
+  const isDependantLink = (link: TrackingLinkDoc) => link.kind === "dependant";
+  const guardians = trackers.filter(isDependantLink);
+  const friendTrackers = trackers.filter((link) => !isDependantLink(link));
+
+  const handleRequestRelease = useCallback((link: TrackingLinkDoc) => {
+    requestRelease(link.id).catch(() => {});
+  }, []);
 
   // This screen shows nobody's position, so being here ends any open session —
   // stepping back from the map is stepping back from watching.
@@ -127,12 +145,12 @@ const TrackeesScreen = () => {
         <Text style={styles.headerTitle}>Track</Text>
         <Pressable
           style={styles.headerAction}
-          onPress={() => setIsPickerVisible(true)}
+          onPress={() => setIsMenuVisible(true)}
           accessibilityRole="button"
-          accessibilityLabel="Ask someone to share their location"
+          accessibilityLabel="Add someone"
         >
           <IconSymbol name="person.badge.plus" size={15} color="#fff" />
-          <Text style={styles.headerActionText}>Ask</Text>
+          <Text style={styles.headerActionText}>Add</Text>
         </Pressable>
       </View>
 
@@ -188,9 +206,20 @@ const TrackeesScreen = () => {
                 <PersonRow
                   name={link.trackeeName}
                   status={
-                    link.pausedByTrackee ? "Paused sharing" : "Sharing with you"
+                    isDependantLink(link)
+                      // Not "always sharing": this row cannot see whether they
+                      // are actually publishing — the rules deliberately keep a
+                      // position unreadable without an open watch session — and
+                      // a dependant who denies location permission in Settings
+                      // stops sharing while this row would still say they were.
+                      // State the arrangement, which is true, not the status,
+                      // which isn't known here.
+                      ? "Your dependant — can't pause or stop"
+                      : link.pausedByTrackee
+                        ? "Paused sharing"
+                        : "Sharing with you"
                   }
-                  isWarning={link.pausedByTrackee}
+                  isWarning={link.pausedByTrackee && !isDependantLink(link)}
                 >
                   <View style={styles.rowButtons}>
                     <RowButton
@@ -243,9 +272,20 @@ const TrackeesScreen = () => {
           </View>
         ) : (
           <View style={styles.card}>
-            {trackers.map((link, index) => (
+            {guardians.map((link, index) => (
               <View key={link.id}>
                 {index > 0 ? <View style={styles.rowDivider} /> : null}
+                <GuardianRow
+                  link={link}
+                  onRequestRelease={handleRequestRelease}
+                />
+              </View>
+            ))}
+            {friendTrackers.map((link, index) => (
+              <View key={link.id}>
+                {(index > 0 || guardians.length > 0) ? (
+                  <View style={styles.rowDivider} />
+                ) : null}
                 <PersonRow
                   name={link.trackerName}
                   status={
@@ -305,13 +345,50 @@ const TrackeesScreen = () => {
       </ScrollView>
 
       {userId ? (
-        <AskToFollowModal
+        <>
+          <AddMenu
+        visible={isMenuVisible}
+        onClose={() => setIsMenuVisible(false)}
+        onAskFriend={() => {
+          setIsMenuVisible(false);
+          setIsPickerVisible(true);
+        }}
+        onAddDependant={() => {
+          setIsMenuVisible(false);
+          setIsDependantVisible(true);
+        }}
+        onEnterCode={() => {
+          setIsMenuVisible(false);
+          setIsCodeVisible(true);
+        }}
+      />
+
+      <AddDependantModal
+        visible={isDependantVisible}
+        onClose={() => setIsDependantVisible(false)}
+      />
+
+      <EnterPairingCodeModal
+        visible={isCodeVisible}
+        onClose={() => setIsCodeVisible(false)}
+        onLinked={(guardianName) => {
+          setIsCodeVisible(false);
+          Alert.alert(
+            "You're linked",
+            `${guardianName} can now see where you are. You'll be told every ` +
+              "time they look, and you can ask to be released at any time.",
+          );
+        }}
+      />
+
+      <AskToFollowModal
           visible={isPickerVisible}
           currentUserId={userId}
           excludedIds={excludedIds}
           onClose={() => setIsPickerVisible(false)}
-          onSelect={handleAsk}
-        />
+            onSelect={handleAsk}
+          />
+        </>
       ) : null}
     </SafeAreaView>
   );

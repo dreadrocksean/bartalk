@@ -202,7 +202,7 @@ service cloud.firestore {
             && isPlausibleTimestamp(
                  request.resource.data.get('releaseRequestedAt', 0))
             && request.resource.data.get('releaseEffectiveAt', 0) ==
-                 request.resource.data.get('releaseRequestedAt', 0) + 172800000)
+                 request.resource.data.get('releaseRequestedAt', 0) + 86400000)
         );
       }
 

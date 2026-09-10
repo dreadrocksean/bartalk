@@ -139,7 +139,7 @@ export const redeemPairingCode = runWith({maxInstances: 10})
       );
     }
 
-    const linkId = await db.runTransaction(async (tx) => {
+    const outcome = await db.runTransaction(async (tx) => {
       const codeRef = db.collection("pairingCodes").doc(code);
       const codeSnap = await tx.get(codeRef);
       if (!codeSnap.exists) {
@@ -200,12 +200,13 @@ export const redeemPairingCode = runWith({maxInstances: 10})
 
       tx.update(codeRef, {usedAt: Date.now(), usedBy: dependantId});
 
-      return id;
+      return {linkId: id, guardianName: nameOf(guardianSnap.data())};
     });
 
-    functions.logger.info("Guardianship established", {linkId});
-    const guardianName = linkId.split("__")[0];
-    return {linkId, guardianName};
+    functions.logger.info("Guardianship established", {
+      linkId: outcome.linkId,
+    });
+    return outcome;
   });
 
 /**

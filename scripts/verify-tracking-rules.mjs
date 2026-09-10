@@ -316,7 +316,7 @@ console.log("\nGuardianship");
 
 const CHILD = "child-uid";
 const DEP_ID = `${PARENT}__${CHILD}`;
-const RELEASE_DELAY_MS = 172800000;
+const RELEASE_DELAY_MS = 86400000;
 const childDb = testEnv.authenticatedContext(CHILD).firestore();
 
 await check("a client cannot create a dependant link", () =>
