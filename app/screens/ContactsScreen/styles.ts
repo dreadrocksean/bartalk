@@ -50,6 +50,32 @@ export default StyleSheet.create({
   name: { fontSize: unity * 18, marginBottom: unity * 2 },
   lastMessage: { color: Colors.light.icon, fontSize: unity * 15 },
   chevron: { marginLeft: unity * 8 },
+
+  // Time above, count below, right-aligned as one column — the arrangement a
+  // chat list is read in: when, then how much is waiting.
+  meta: {
+    minWidth: unity * 60,
+    marginRight: unity * 8,
+    alignItems: "flex-end",
+    gap: unity * 5,
+  },
+  metaTime: { color: Colors.light.icon, textAlign: "right" },
+  unreadBadge: {
+    minWidth: unity * 22,
+    height: unity * 22,
+    borderRadius: unity * 11,
+    paddingHorizontal: unity * 7,
+    backgroundColor: "#E5342B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  unreadBadgeText: {
+    color: "#fff",
+    fontSize: unity * 13,
+    fontWeight: "800",
+    includeFontPadding: false,
+    textAlign: "center",
+  },
   unreadDot: {
     width: unity * 10,
     height: unity * 10,

@@ -58,15 +58,28 @@ export const OtherTrackeesMenu = ({
             <View key={option.trackeeId}>
               {index > 0 ? <View style={styles.dropdownDivider} /> : null}
               <Pressable
-                style={styles.dropdownRow}
+                style={[
+                  styles.dropdownRow,
+                  option.paused && styles.dropdownRowDisabled,
+                ]}
+                disabled={option.paused}
                 onPress={() => {
                   setIsOpen(false);
                   onSelect(option);
                 }}
                 accessibilityRole="button"
-                accessibilityLabel={`Track ${option.name}. Notifies them.`}
+                accessibilityState={{ disabled: option.paused }}
+                accessibilityLabel={
+                  option.paused
+                    ? `${option.name} has paused sharing`
+                    : `Track ${option.name}. Notifies them.`
+                }
               >
-                <IconSymbol name="iphone" size={17} color={Colors.light.tint} />
+                <IconSymbol
+                  name="iphone"
+                  size={17}
+                  color={option.paused ? Colors.light.icon : Colors.light.tint}
+                />
                 <Text style={styles.dropdownRowText} numberOfLines={1}>
                   {option.name}
                 </Text>

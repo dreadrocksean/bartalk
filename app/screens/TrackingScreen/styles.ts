@@ -71,6 +71,8 @@ export default StyleSheet.create({
   watchedChipAge: { fontSize: unity * 11, color: Colors.light.icon },
 
   // -------- The ceiling on a look --------
+  dropdownRowDisabled: { opacity: 0.45 },
+
   expiryChip: {
     flexDirection: "row",
     alignItems: "center",

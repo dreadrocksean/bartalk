@@ -203,8 +203,13 @@ const TrackeesScreen = () => {
                       label="Track"
                       icon="location.fill"
                       variant="primary"
+                      disabled={link.pausedByTrackee}
                       onPress={() => openMap(link)}
-                      accessibilityHint={`Opens the map and tells ${link.trackeeName} you're looking`}
+                      accessibilityHint={
+                        link.pausedByTrackee
+                          ? `${link.trackeeName} has paused sharing, so there is nothing to see`
+                          : `Opens the map and tells ${link.trackeeName} you're looking`
+                      }
                     />
                   </View>
                 </PersonRow>

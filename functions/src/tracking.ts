@@ -65,8 +65,12 @@ const notifyTrackee = async (
     await sendExpoPush(
       {
         to: target.token,
-        title: "👀 Location checked",
-        body: `${trackerName} is looking at your location. This ends in ` +
+        // The name belongs in the title. A lock screen shows the title in
+        // full and truncates the body, and "who" is the entire point of this
+        // notification — a generic title makes the reader open the app to
+        // learn the one fact they needed.
+        title: `👀 ${trackerName} is checking your location`,
+        body: "You'll be told when they stop. This look ends in " +
           `${Math.round(WATCH_SESSION_MAX_MS / 1000)} seconds.`,
         sound: "default",
         channelId: "messages",
@@ -154,9 +158,8 @@ const notifyWatchEnded = async (
   await sendExpoPush(
     {
       to: target.token,
-      title: "Location no longer shared",
-      body: `${trackerName} checked your location for ` +
-        `${formatDuration(durationMs)}. They are no longer viewing it.`,
+      title: `${trackerName} stopped checking your location`,
+      body: `They looked for ${formatDuration(durationMs)}.`,
       sound: "default",
       channelId: "messages",
       priority: "high",
@@ -229,12 +232,110 @@ export const onWatchSessionWrite = runWith({maxInstances: 10})
         return null;
       }
 
+      // A heartbeat on a session that has passed the ceiling closes it here,
+      // rather than waiting for the reaper. The reaper is a one-minute cron, so
+      // on its own it lets the *ending* notification drift up to a minute past
+      // the moment the position actually stopped being served — long enough
+      // that the trackee reasonably concludes it never came.
+      //
+      // This costs nothing: the function already runs on every heartbeat write
+      // and until now did nothing with them. A tracker sitting on the map beats
+      // every 20s, so the ending lands within 20s of the ceiling even for a
+      // client that knows nothing about it. The reaper stays as the backstop
+      // for the case this cannot cover — a tracker who stopped beating at all.
+      if (wasActive && isActive) {
+        const startedAt =
+          typeof after.startedAt === "number" ? after.startedAt : 0;
+        const now = Date.now();
+        if (startedAt > 0 && now - startedAt >= WATCH_SESSION_MAX_MS) {
+          functions.logger.info("Closing session at the ceiling", {
+            sessionId,
+            ageMs: now - startedAt,
+          });
+          await db.collection("watchSessions").doc(sessionId).update({
+            active: false,
+            // Clamped to at least startedAt. These two values are read from a
+            // document that may have been rewritten between the trigger firing
+            // and this write, and a session that ended before it began would
+            // put a nonsense entry in a log nobody can delete.
+            endedAt: Math.max(
+              startedAt,
+              Math.min(startedAt + WATCH_SESSION_MAX_MS, now),
+            ),
+          });
+        }
+        return null;
+      }
+
       if (wasActive && !isActive) {
         const durationMs = await recordCompletedWatch(sessionId, after);
         if (durationMs !== null) {
           await notifyWatchEnded(sessionId, after, durationMs);
         }
       }
+
+      return null;
+    },
+  );
+
+/**
+ * Pausing or revoking ends any look already in progress.
+ *
+ * The rules stop a *new* session being opened once sharing is paused, but a
+ * session opened a moment earlier would otherwise stay active until the ceiling
+ * caught it — leaving the trackee's banner saying they are being watched for up
+ * to a minute after they pressed the button that was supposed to stop exactly
+ * that. Pause has to take effect when it is pressed, or it isn't a control.
+ *
+ * Closing it here also writes the audit entry, so a look cut short by a pause
+ * is recorded with the length it actually had.
+ */
+export const onTrackingLinkWrite = runWith({maxInstances: 10})
+  .firestore
+  .document("trackingLinks/{linkId}")
+  .onWrite(
+    async (
+      change: functions.Change<functions.firestore.DocumentSnapshot>,
+      context: functions.EventContext,
+    ) => {
+      const after = change.after.exists ? change.after.data() : null;
+      if (!after) {
+        return null;
+      }
+
+      const stillSharing =
+        after.status === "active" && after.pausedByTrackee !== true;
+      if (stillSharing) {
+        return null;
+      }
+
+      // Watch sessions and tracking links share an id, both being
+      // `trackerId__trackeeId`.
+      const sessionId = context.params.linkId as string;
+      const sessionRef = db.collection("watchSessions").doc(sessionId);
+      const session = await sessionRef.get();
+      if (!session.exists || session.data()?.active !== true) {
+        return null;
+      }
+
+      functions.logger.info("Ending watch session because sharing stopped", {
+        sessionId,
+        status: after.status,
+        paused: after.pausedByTrackee === true,
+      });
+
+      const startedAt =
+        typeof session.data()?.startedAt === "number" ?
+          (session.data()?.startedAt as number) :
+          Date.now();
+
+      await sessionRef.update({
+        active: false,
+        endedAt: Math.max(
+          startedAt,
+          Math.min(startedAt + WATCH_SESSION_MAX_MS, Date.now()),
+        ),
+      });
 
       return null;
     },

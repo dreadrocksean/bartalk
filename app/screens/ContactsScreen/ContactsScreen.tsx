@@ -21,6 +21,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useUnreadCounts } from "../../../hooks/use-unread-counts";
 import { useWatchScope } from "../../../hooks/use-watch-scope";
 import { ThemedText } from "../../../components/themed-text";
 import { IconSymbol } from "../../../components/ui/icon-symbol";
@@ -65,6 +66,7 @@ const ContactsScreen: FC<ContactsScreenProps> = ({ user }) => {
   // — otherwise stepping back from a tracked chat would leave the trackee's
   // banner lit for a tracker who has stopped looking.
   useWatchScope("none");
+  const { counts: unreadCounts } = useUnreadCounts(user.uid);
 
   const [menuVisible, setMenuVisible] = useState(false);
   const [contacts, setContacts] = useState<UserDoc[]>([]);
@@ -215,9 +217,14 @@ const ContactsScreen: FC<ContactsScreenProps> = ({ user }) => {
       const lastMsgTime = lastMsg?.timestamp
         ? formatDate(lastMsg.timestamp)
         : "";
-      // Unread logic: show blue dot if the last message was sent by the other party and user has not read it
+      // The count comes from a server-maintained field, which only exists for
+      // conversations that have received a message since it was added. The
+      // read receipt below is the older signal and still covers everything
+      // before that, so it stays as the fallback: a badge when we know how
+      // many, a dot when we only know that there is something.
+      const unreadCount = unreadCounts[item.id] ?? 0;
       let showUnreadDot = false;
-      if (convo && lastMsg && lastMsg.sender !== user.uid) {
+      if (unreadCount === 0 && convo && lastMsg && lastMsg.sender !== user.uid) {
         const readReceipts = convo.readReceipts || {};
         const receipt = readReceipts[user.uid];
         if (!receipt || receipt.lastReadMessageId !== lastMsg.id) {
@@ -249,17 +256,24 @@ const ContactsScreen: FC<ContactsScreenProps> = ({ user }) => {
               {snippet}
             </ThemedText>
           </View>
-          {lastMsgTime ? (
-            <Text
-              style={{
-                color: Colors.light.icon,
-                marginRight: 8,
-                minWidth: 60,
-                textAlign: "right",
-              }}
-            >
-              {lastMsgTime}
-            </Text>
+          {lastMsgTime || unreadCount > 0 ? (
+            <View style={styles.meta}>
+              {lastMsgTime ? (
+                <Text style={styles.metaTime}>{lastMsgTime}</Text>
+              ) : null}
+              {unreadCount > 0 ? (
+                <View
+                  style={styles.unreadBadge}
+                  accessibilityLabel={`${unreadCount} unread ${
+                    unreadCount === 1 ? "message" : "messages"
+                  }`}
+                >
+                  <Text style={styles.unreadBadgeText} numberOfLines={1}>
+                    {unreadCount > 99 ? "99+" : unreadCount}
+                  </Text>
+                </View>
+              ) : null}
+            </View>
           ) : null}
           <IconSymbol
             name="chevron.right"
@@ -270,7 +284,7 @@ const ContactsScreen: FC<ContactsScreenProps> = ({ user }) => {
         </TouchableOpacity>
       );
     },
-    [conversations, handlePress, user.uid],
+    [conversations, handlePress, unreadCounts, user.uid],
   );
 
   // User avatar initials

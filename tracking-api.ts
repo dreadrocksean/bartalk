@@ -303,7 +303,7 @@ export const listenForLocation = (
  * to the trackee, so it must happen before any position is shown — never after,
  * and never conditionally.
  */
-export const startWatchSession = ({
+export const startWatchSession = async ({
   trackerId,
   trackerName,
   trackeeId,
@@ -312,20 +312,38 @@ export const startWatchSession = ({
   trackerName: string;
   trackeeId: string;
 }) => {
-  const now = Date.now();
-  return setDoc(
-    doc(getDb(), WATCH_SESSIONS, buildWatchSessionId(trackerId, trackeeId)),
-    {
-      trackerId,
-      trackeeId,
-      trackerName,
-      active: true,
-      startedAt: now,
-      lastHeartbeatAt: now,
-      endedAt: null,
-    },
-    { merge: true },
-  );
+  const open = () => {
+    const now = Date.now();
+    return setDoc(
+      doc(getDb(), WATCH_SESSIONS, buildWatchSessionId(trackerId, trackeeId)),
+      {
+        trackerId,
+        trackeeId,
+        trackerName,
+        active: true,
+        startedAt: now,
+        lastHeartbeatAt: now,
+        endedAt: null,
+      },
+      { merge: true },
+    );
+  };
+
+  try {
+    await open();
+  } catch {
+    // The rules refuse a fresh start time on a session that is still marked
+    // active, because reopening has to cross inactive -> active — that edge is
+    // what notifies the trackee, and letting a start time slide forward would
+    // be a way to keep watching in silence.
+    //
+    // So a session orphaned by a crash blocks the next one. Close it first:
+    // that writes the audit entry the crash never wrote and tells the trackee
+    // the old look ended, and only then does the new look begin, announcing
+    // itself the way every look does.
+    await endWatchSession({ trackerId, trackeeId });
+    await open();
+  }
 };
 
 export const heartbeatWatchSession = ({

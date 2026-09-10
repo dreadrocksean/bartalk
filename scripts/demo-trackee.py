@@ -11,6 +11,7 @@ Everything it writes is prefixed `demo-` and removable with `--remove`.
   ./scripts/demo-trackee.py --seed --near 39.0997,-94.5786
   ./scripts/demo-trackee.py --walk              # move the pin every 3s
   ./scripts/demo-trackee.py --ping              # real push to YOUR phone
+  ./scripts/demo-trackee.py --expire            # let the 60s ceiling end it
   ./scripts/demo-trackee.py --message -n 3      # 3 unread messages, for the badge
   ./scripts/demo-trackee.py --remove
 
@@ -293,6 +294,72 @@ def message(owner_uid, text, count):
     print(f"  unreadCounts[{owner_uid[:8]}…] = {got}")
 
 
+def expire(owner_uid, owner):
+    """Open a watch session on the owner and keep it alive, so the ceiling ends
+    it rather than a polite close. This is the path a tracker takes when they
+    simply leave the map open — and the only way to see the automatic ending
+    notification arrive on a real device."""
+    sid = f"{DEMO_UID}{'__'}{owner_uid}"
+
+    # Close anything left open from a previous run. This script writes as
+    # project owner and so bypasses the rule that stops a real client reusing a
+    # live session — without this, a leftover session gets its start time
+    # rewritten instead of a new one being opened, and no notification fires.
+    existing = dec(call("GET", f"/watchSessions/{sid}", quiet=True) or {})
+    if existing.get("active") is True:
+        print("  closing a session left over from a previous run")
+        put("watchSessions", sid, {
+            "trackerId": DEMO_UID, "trackeeId": owner_uid,
+            "trackerName": DEMO_NAME, "active": False,
+            "startedAt": existing.get("startedAt", now_ms()),
+            "lastHeartbeatAt": existing.get("lastHeartbeatAt", now_ms()),
+            "endedAt": now_ms(),
+        })
+        time.sleep(3)
+
+    started = now_ms()
+    put("watchSessions", sid, {
+        "trackerId": DEMO_UID, "trackeeId": owner_uid,
+        "trackerName": DEMO_NAME, "active": True,
+        "startedAt": started, "lastHeartbeatAt": started,
+    })
+    print(f"  opened — {DEMO_NAME} is looking at {name_of(owner)}")
+    print("  NOT closing it. The ceiling has to do that.")
+    print(f"  expect: “👀 {DEMO_NAME} is checking your location”")
+
+    last_beat = started
+    while True:
+        time.sleep(5)
+        now = now_ms()
+        age = (now - started) / 1000
+        session = dec(call("GET", f"/watchSessions/{sid}", quiet=True) or {})
+
+        if session.get("active") is False:
+            ended = session.get("endedAt", now)
+            print(f"  t+{age:5.0f}s  ENDED by the server — "
+                  f"credited {(ended - started) / 1000:.0f}s")
+            print(f"  expect: “{DEMO_NAME} stopped checking your location”")
+            break
+
+        # Heartbeat like a real tracker sitting on the map, so nothing is
+        # closed for looking dead. Every field goes back, because a partial
+        # write here would replace the document rather than update it.
+        if now - last_beat >= 20_000:
+            put("watchSessions", sid, {
+                "trackerId": DEMO_UID, "trackeeId": owner_uid,
+                "trackerName": DEMO_NAME, "active": True,
+                "startedAt": started, "lastHeartbeatAt": now,
+            })
+            last_beat = now
+            print(f"  t+{age:5.0f}s  heartbeat")
+        else:
+            print(f"  t+{age:5.0f}s  still open")
+
+        if age > 200:
+            print("  !! never ended — something is wrong")
+            break
+
+
 def remove():
     gone = []
     convo_id = f"demo-convo-{DEMO_UID}"
@@ -335,6 +402,8 @@ def main():
     ap.add_argument("--seed", action="store_true", help="create the demo trackee and link")
     ap.add_argument("--walk", action="store_true", help="move the demo pin every 3s")
     ap.add_argument("--ping", action="store_true", help="watch YOU, sending a real push")
+    ap.add_argument("--expire", action="store_true",
+                    help="watch YOU and let the 60s ceiling end it")
     ap.add_argument("--message", nargs="?", const="Hey, where are you?",
                     metavar="TEXT", help="send messages, to test the unread badge")
     ap.add_argument("-n", "--count", type=int, default=1, metavar="N",
@@ -349,7 +418,7 @@ def main():
     ap.add_argument("--hold", type=int, default=15, metavar="S", help="--ping session length")
     a = ap.parse_args()
 
-    if not any((a.seed, a.walk, a.ping, a.remove, a.message)):
+    if not any((a.seed, a.walk, a.ping, a.remove, a.message, a.expire)):
         ap.print_help()
         return
 
@@ -380,6 +449,8 @@ def main():
         message(owner_uid, a.message, max(1, a.count))
     if a.ping:
         ping(owner_uid, owner, a.hold)
+    if a.expire:
+        expire(owner_uid, owner)
 
 
 if __name__ == "__main__":

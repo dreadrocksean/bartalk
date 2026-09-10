@@ -157,7 +157,7 @@ await check("...and only now is the position readable", () =>
   assertSucceeds(getDoc(docRef(parentDb, "locations", TEEN))),
 );
 
-await check("a long watch can still heartbeat with an old startedAt", () =>
+await check("a watch inside the ceiling can heartbeat", () =>
   assertSucceeds(
     updateDoc(docRef(parentDb, "watchSessions", LINK_ID), {
       lastHeartbeatAt: Date.now(),
@@ -183,6 +183,114 @@ await check("a stranger cannot open a session on someone", () =>
     }),
   ),
 );
+
+console.log("\nThe ceiling");
+
+await check("startedAt cannot be slid forward on a live session", () =>
+  assertFails(
+    updateDoc(docRef(parentDb, "watchSessions", LINK_ID), {
+      startedAt: Date.now(),
+      lastHeartbeatAt: Date.now(),
+    }),
+  ),
+);
+
+// Age the session past the ceiling without touching the rules, so what follows
+// tests the ceiling rather than the write that would have created it.
+await testEnv.withSecurityRulesDisabled(async (context) => {
+  await setDoc(
+    docRef(context.firestore(), "watchSessions", LINK_ID),
+    { startedAt: Date.now() - 61000, lastHeartbeatAt: Date.now() - 61000 },
+    { merge: true },
+  );
+});
+
+await check("the position stops being served once the ceiling passes", () =>
+  assertFails(getDoc(docRef(parentDb, "locations", TEEN))),
+);
+
+await check("an expired session cannot be kept alive by heartbeating", () =>
+  assertFails(
+    updateDoc(docRef(parentDb, "watchSessions", LINK_ID), {
+      lastHeartbeatAt: Date.now(),
+    }),
+  ),
+);
+
+await check("closing an expired session is always allowed", () =>
+  assertSucceeds(
+    updateDoc(docRef(parentDb, "watchSessions", LINK_ID), {
+      active: false,
+      endedAt: Date.now(),
+    }),
+  ),
+);
+
+await check("...and looking again is immediate, but starts a new session", () =>
+  assertSucceeds(
+    updateDoc(docRef(parentDb, "watchSessions", LINK_ID), {
+      active: true,
+      startedAt: Date.now(),
+      lastHeartbeatAt: Date.now(),
+    }),
+  ),
+);
+
+console.log("\nPausing");
+
+await check("the trackee may pause", () =>
+  assertSucceeds(
+    updateDoc(docRef(teenDb, "trackingLinks", LINK_ID), {
+      pausedByTrackee: true,
+    }),
+  ),
+);
+
+await check("a paused trackee's watcher cannot heartbeat", () =>
+  assertFails(
+    updateDoc(docRef(parentDb, "watchSessions", LINK_ID), {
+      lastHeartbeatAt: Date.now(),
+    }),
+  ),
+);
+
+await check("the tracker may still close the session they opened", () =>
+  assertSucceeds(
+    updateDoc(docRef(parentDb, "watchSessions", LINK_ID), {
+      active: false,
+      endedAt: Date.now(),
+    }),
+  ),
+);
+
+// The one that matters: pausing already emptied sharedWith, so a paused
+// trackee's position was never readable. But until this rule existed a session
+// could still be OPENED, which notified them that someone was checking on them
+// while that someone saw nothing at all.
+await check("a paused trackee cannot be watched at all", () =>
+  assertFails(
+    updateDoc(docRef(parentDb, "watchSessions", LINK_ID), {
+      active: true,
+      startedAt: Date.now(),
+      lastHeartbeatAt: Date.now(),
+    }),
+  ),
+);
+
+await check("unpausing lets the tracker look again", async () => {
+  await assertSucceeds(
+    updateDoc(docRef(teenDb, "trackingLinks", LINK_ID), {
+      pausedByTrackee: false,
+    }),
+  );
+  await assertSucceeds(
+    updateDoc(docRef(parentDb, "watchSessions", LINK_ID), {
+      active: true,
+      startedAt: Date.now(),
+      lastHeartbeatAt: Date.now(),
+    }),
+  );
+});
 
 console.log("\nRevocation");
 

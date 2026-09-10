@@ -108,6 +108,12 @@ export default StyleSheet.create({
     fontWeight: "700",
     color: Colors.light.text,
   },
+  actionButtonDisabled: {
+    backgroundColor: Colors.light.inputBar,
+    borderColor: Colors.light.border,
+    opacity: 0.75,
+  },
+  actionButtonTextDisabled: { color: Colors.light.icon },
   actionButtonTextPrimary: { color: "#fff" },
   actionButtonTextDanger: { color: "#B00020" },
 

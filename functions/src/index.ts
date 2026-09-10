@@ -8,7 +8,11 @@ import {runWith} from "firebase-functions/v1";
 import {admin, db} from "./admin";
 import {getUserPushTarget, sendExpoPush} from "./push";
 
-export {onWatchSessionWrite, reapStaleWatchSessions} from "./tracking";
+export {
+  onTrackingLinkWrite,
+  onWatchSessionWrite,
+  reapStaleWatchSessions,
+} from "./tracking";
 
 const ANDROID_NOTIFICATION_CHANNEL_ID = "messages";
 

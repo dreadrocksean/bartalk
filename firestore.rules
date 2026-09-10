@@ -44,10 +44,21 @@ service cloud.firestore {
       ).data;
     }
 
-    function hasActiveLink(trackerId, trackeeId) {
+    // Whether this tracker may currently look at this trackee at all.
+    //
+    // Pausing has to be checked here, not only on the position document. It
+    // already emptied `sharedWith`, so a paused trackee's location was never
+    // readable — but a watch session could still be opened, which notified them
+    // that someone was checking on them while that someone saw nothing. A
+    // notification for a look that revealed nothing is a false alarm, and false
+    // alarms are how a person learns to ignore the real ones. Pausing means
+    // nobody is looking, not merely that nobody succeeds.
+    function isSharingWith(trackerId, trackeeId) {
       return exists(
         /databases/$(database)/documents/trackingLinks/$(linkId(trackerId, trackeeId))
-      ) && linkFor(trackerId, trackeeId).status == 'active';
+      )
+        && linkFor(trackerId, trackeeId).status == 'active'
+        && linkFor(trackerId, trackeeId).pausedByTrackee == false;
     }
 
     // The hard ceiling on one look. Mirrors WATCH_SESSION_MAX_MS in
@@ -202,7 +213,7 @@ service cloud.firestore {
         && isPlausibleTimestamp(request.resource.data.startedAt)
         && isPlausibleTimestamp(request.resource.data.lastHeartbeatAt)
         && noServerFieldsOnCreate()
-        && hasActiveLink(uid(), request.resource.data.trackeeId);
+        && isSharingWith(uid(), request.resource.data.trackeeId);
 
       allow update: if isSignedIn()
         && uid() == resource.data.trackerId
@@ -227,7 +238,7 @@ service cloud.firestore {
                 && nowMs() - resource.data.startedAt < watchCeilingMs())
             )
             && isPlausibleTimestamp(request.resource.data.lastHeartbeatAt)
-            && hasActiveLink(uid(), resource.data.trackeeId))
+            && isSharingWith(uid(), resource.data.trackeeId))
           || request.resource.data.active == false
         );
 

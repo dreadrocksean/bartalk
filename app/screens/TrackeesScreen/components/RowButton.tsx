@@ -10,6 +10,7 @@ type RowButtonProps = {
   variant?: "default" | "primary" | "danger";
   /** Unread count. Omitted or zero renders nothing. */
   badgeCount?: number;
+  disabled?: boolean;
   onPress: () => void;
   accessibilityHint?: string;
 };
@@ -19,11 +20,14 @@ export const RowButton = ({
   icon,
   variant = "default",
   badgeCount = 0,
+  disabled = false,
   onPress,
   accessibilityHint,
 }: RowButtonProps) => {
-  const isPrimary = variant === "primary";
-  const tint = isPrimary
+  const isPrimary = variant === "primary" && !disabled;
+  const tint = disabled
+    ? Colors.light.icon
+    : isPrimary
     ? "#fff"
     : variant === "danger"
       ? "#B00020"
@@ -36,9 +40,15 @@ export const RowButton = ({
 
   return (
     <Pressable
-      style={[styles.actionButton, isPrimary && styles.actionButtonPrimary]}
-      onPress={onPress}
+      style={[
+        styles.actionButton,
+        isPrimary && styles.actionButtonPrimary,
+        disabled && styles.actionButtonDisabled,
+      ]}
+      onPress={disabled ? undefined : onPress}
+      disabled={disabled}
       accessibilityRole="button"
+      accessibilityState={{ disabled }}
       accessibilityLabel={
         hasBadge
           ? `${label}, ${badgeCount} unread ${
@@ -53,7 +63,8 @@ export const RowButton = ({
         style={[
           styles.actionButtonText,
           isPrimary && styles.actionButtonTextPrimary,
-          variant === "danger" && styles.actionButtonTextDanger,
+          variant === "danger" && !disabled && styles.actionButtonTextDanger,
+          disabled && styles.actionButtonTextDisabled,
         ]}
       >
         {label}
