@@ -1,0 +1,218 @@
+rules_version = '2';
+
+// BarTalk security rules.
+//
+// The tracking rules carry a property the client cannot be trusted to keep on
+// its own: a tracker can only read someone's position while a watch session
+// exists, and a watch session is exactly what causes that person to be
+// notified. Seeing therefore cannot happen without telling — not by a modified
+// client, not by a direct API call.
+//
+// NOTE: this file is new. Rules for this project were previously managed in the
+// Firebase console; review it against what is live before deploying.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function uid() {
+      return request.auth.uid;
+    }
+
+    function nowMs() {
+      return request.time.toMillis();
+    }
+
+    // Client clocks drift; five minutes of slack still prevents a tracker
+    // backdating a session to make a long look read as a short one.
+    function isPlausibleTimestamp(value) {
+      return value is number
+        && value > nowMs() - 300000
+        && value < nowMs() + 300000;
+    }
+
+    function linkId(trackerId, trackeeId) {
+      return trackerId + '__' + trackeeId;
+    }
+
+    function linkFor(trackerId, trackeeId) {
+      return get(
+        /databases/$(database)/documents/trackingLinks/$(linkId(trackerId, trackeeId))
+      ).data;
+    }
+
+    function hasActiveLink(trackerId, trackeeId) {
+      return exists(
+        /databases/$(database)/documents/trackingLinks/$(linkId(trackerId, trackeeId))
+      ) && linkFor(trackerId, trackeeId).status == 'active';
+    }
+
+    function isWatching(trackerId, trackeeId) {
+      return exists(
+        /databases/$(database)/documents/watchSessions/$(linkId(trackerId, trackeeId))
+      ) && get(
+        /databases/$(database)/documents/watchSessions/$(linkId(trackerId, trackeeId))
+      ).data.active == true;
+    }
+
+    // ---------------- Users ----------------
+    // The directory is readable by any signed-in user, which is what the
+    // contacts list is built from. Each user owns only their own document.
+    match /Users/{userId} {
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn() && uid() == userId;
+      allow delete: if false;
+    }
+
+    // ---------------- Messaging ----------------
+    match /conversations/{conversationId} {
+      allow read: if isSignedIn() && uid() in resource.data.participants;
+      allow create: if isSignedIn()
+        && uid() in request.resource.data.participants
+        && request.resource.data.participants.size() == 2;
+      allow update: if isSignedIn() && uid() in resource.data.participants;
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        function participants() {
+          return get(
+            /databases/$(database)/documents/conversations/$(conversationId)
+          ).data.participants;
+        }
+
+        allow read: if isSignedIn() && uid() in participants();
+        allow create: if isSignedIn()
+          && uid() in participants()
+          && request.resource.data.sender == uid();
+        allow update, delete: if isSignedIn() && uid() in participants();
+      }
+    }
+
+    // ---------------- Tracking links ----------------
+    // A tracker may ask; only the trackee may grant, pause or withdraw.
+    match /trackingLinks/{id} {
+      // resource is null when the document doesn't exist; without this guard a
+      // first-time "have we already asked this person?" check is denied rather
+      // than simply coming back empty.
+      allow read: if isSignedIn()
+        && (resource == null || uid() in resource.data.members);
+
+      allow create: if isSignedIn()
+        && request.resource.data.trackerId == uid()
+        && request.resource.data.status == 'pending'
+        && request.resource.data.pausedByTrackee == false
+        && id == linkId(
+          request.resource.data.trackerId,
+          request.resource.data.trackeeId
+        )
+        && request.resource.data.members.hasOnly([
+          request.resource.data.trackerId,
+          request.resource.data.trackeeId
+        ]);
+
+      // Neither side may rewrite who the link is between.
+      function participantsUnchanged() {
+        return request.resource.data.trackerId == resource.data.trackerId
+          && request.resource.data.trackeeId == resource.data.trackeeId
+          && request.resource.data.members == resource.data.members;
+      }
+
+      allow update: if isSignedIn() && participantsUnchanged() && (
+        // The trackee decides everything about being seen.
+        (uid() == resource.data.trackeeId
+          && request.resource.data.status in ['active', 'declined', 'revoked'])
+        // The tracker may only re-ask or withdraw their own request. They can
+        // never move a link to 'active' — that is the trackee's consent.
+        || (uid() == resource.data.trackerId
+          && request.resource.data.status in ['pending', 'revoked']
+          && request.resource.data.pausedByTrackee == resource.data.pausedByTrackee)
+      );
+
+      allow delete: if false;
+    }
+
+    // ---------------- Positions ----------------
+    // Written only by the person they describe. Read only by someone that
+    // person is actively sharing with AND who currently has a watch session
+    // open — which is to say, someone the trackee has just been told about.
+    match /locations/{userId} {
+      allow read: if isSignedIn() && (
+        resource == null
+        || uid() == userId
+        || (uid() in resource.data.sharedWith && isWatching(uid(), userId))
+      );
+      allow create, update: if isSignedIn() && uid() == userId;
+      allow delete: if isSignedIn() && uid() == userId;
+    }
+
+    // ---------------- Watch sessions ----------------
+    // The record of someone looking. Written by the tracker, readable by both,
+    // and deletable by nobody: the trackee must never be able to hide that they
+    // were watched, and the tracker must never be able to hide that they
+    // watched.
+    match /watchSessions/{id} {
+      allow read: if isSignedIn() && (
+        resource == null
+        || uid() == resource.data.trackerId
+        || uid() == resource.data.trackeeId
+      );
+
+      // notifiedAt and wakePushedAt are the server's cooldown bookkeeping. If a
+      // client could write them, a tracker could pre-set notifiedAt and look
+      // without the trackee ever being told.
+      function noServerFieldsOnCreate() {
+        return !request.resource.data.keys().hasAny([
+          'notifiedAt', 'wakePushedAt'
+        ]);
+      }
+
+      function noServerFieldsOnUpdate() {
+        return !request.resource.data.diff(resource.data).affectedKeys().hasAny([
+          'notifiedAt', 'wakePushedAt'
+        ]);
+      }
+
+      allow create: if isSignedIn()
+        && request.resource.data.trackerId == uid()
+        && id == linkId(uid(), request.resource.data.trackeeId)
+        && request.resource.data.active == true
+        && isPlausibleTimestamp(request.resource.data.startedAt)
+        && isPlausibleTimestamp(request.resource.data.lastHeartbeatAt)
+        && noServerFieldsOnCreate()
+        && hasActiveLink(uid(), request.resource.data.trackeeId);
+
+      allow update: if isSignedIn()
+        && uid() == resource.data.trackerId
+        && request.resource.data.trackerId == resource.data.trackerId
+        && request.resource.data.trackeeId == resource.data.trackeeId
+        && noServerFieldsOnUpdate()
+        && (
+          // Reopening a session, or heartbeating / closing an open one.
+          (request.resource.data.active == true
+            // startedAt is only checked when it actually changes: a long watch
+            // legitimately has an old start time, and every heartbeat would
+            // otherwise be rejected once it aged past the window.
+            && (request.resource.data.startedAt == resource.data.startedAt
+              || isPlausibleTimestamp(request.resource.data.startedAt))
+            && isPlausibleTimestamp(request.resource.data.lastHeartbeatAt)
+            && hasActiveLink(uid(), resource.data.trackeeId))
+          || request.resource.data.active == false
+        );
+
+      allow delete: if false;
+    }
+
+    // ---------------- Watch history ----------------
+    // Written only by the Cloud Function, which bypasses these rules. No device
+    // can forge an entry or erase one.
+    match /trackingEvents/{eventId} {
+      allow read: if isSignedIn() && (
+        uid() == resource.data.trackeeId || uid() == resource.data.trackerId
+      );
+      allow write: if false;
+    }
+  }
+}

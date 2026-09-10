@@ -18,8 +18,10 @@ import {
   Text,
   TextInput,
   View,
+  type ViewToken,
 } from "react-native";
 import { TypingIndicatorDots } from "../../../components/typing-indicator-dots";
+import { useWatchScope } from "../../../hooks/use-watch-scope";
 
 import type { MessagesPageCursor } from "../../../api";
 import {
@@ -48,7 +50,6 @@ import type {
   PendingImage,
   ReplyTarget,
   SwipeAutoCloseTimeoutsMap,
-  TopLoadAnchor,
 } from "./types";
 
 import {
@@ -66,6 +67,7 @@ import { ImageViewerModal } from "./components/ImageViewerModal";
 import { MessageActionSheetModal } from "./components/MessageActionSheetModal";
 import { MessageComposer } from "./components/MessageComposer";
 import { MessageRow } from "./components/MessageRow";
+import { MiniMapDock } from "./components/MiniMapDock";
 import styles from "./styles";
 import {
   buildMessageListItems,
@@ -87,7 +89,25 @@ const MessagingScreen = () => {
   }, [contactName, navigation]);
 
   const contactIdValue = String(contactId);
+  const contactNameValue =
+    typeof contactName === "string" ? contactName.trim() : "";
   const currentUserId = getAuth().currentUser?.uid ?? null;
+
+  // "preserve" continues a watch that is already open for this person — the
+  // case where you tapped their pin on the map to come here. It never starts
+  // one, so opening a chat can't reveal a position without them being told.
+  useWatchScope(
+    "preserve",
+    useMemo(
+      () => [
+        {
+          trackeeId: contactIdValue,
+          trackeeName: contactNameValue || "Trackee",
+        },
+      ],
+      [contactIdValue, contactNameValue],
+    ),
+  );
   const [recentMessages, setRecentMessages] = useState<MessageDoc[]>([]);
   const [olderMessages, setOlderMessages] = useState<MessageDoc[]>([]);
   const [isLoadingOlderMessages, setIsLoadingOlderMessages] = useState(false);
@@ -106,11 +126,18 @@ const MessagingScreen = () => {
   const isInitialAutoPinActiveRef = useRef(true);
   const hasUserScrolledRef = useRef(false);
   const canTriggerTopLoadRef = useRef(true);
-  const topLoadAnchorRef = useRef<TopLoadAnchor | null>(null);
   const lastScrollOffsetYRef = useRef(0);
   const oldestMessageCursorRef = useRef<MessagesPageCursor | null>(null);
   const isLoadingOlderMessagesRef = useRef(false);
   const lastOlderLoadAttemptAtRef = useRef(0);
+  const shouldLogOlderFetchPostStateRef = useRef(false);
+  const topVisibleMessageDebugRef = useRef<{
+    id: string;
+    snippet: string;
+    timestamp: number;
+    sender: string;
+  } | null>(null);
+  const lastContentHeightRef = useRef(0);
   const inputRef = useRef<TextInput>(null);
   const typingStopTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -229,12 +256,9 @@ const MessagingScreen = () => {
         setOlderMessages((current) =>
           mergeMessagesChronologically(current, page.messages as MessageDoc[]),
         );
-      } else {
-        topLoadAnchorRef.current = null;
       }
     } catch (error) {
       console.error("Failed to load older messages:", error);
-      topLoadAnchorRef.current = null;
     } finally {
       isLoadingOlderMessagesRef.current = false;
       setIsLoadingOlderMessages(false);
@@ -251,15 +275,9 @@ const MessagingScreen = () => {
       const distanceFromBottom =
         nativeEvent.contentSize.height -
         (currentOffsetY + nativeEvent.layoutMeasurement.height);
+      lastContentHeightRef.current = nativeEvent.contentSize.height;
       shouldAutoScrollToLatestRef.current =
         distanceFromBottom <= AUTO_SCROLL_BOTTOM_THRESHOLD_PX;
-
-      if (!hasUserScrolledRef.current && currentOffsetY > 2) {
-        hasUserScrolledRef.current = true;
-        isInitialAutoPinActiveRef.current = false;
-        shouldAutoScrollToLatestRef.current = false;
-        forceAutoScrollToLatestRef.current = false;
-      }
 
       if (!hasUserScrolledRef.current) {
         return;
@@ -274,17 +292,20 @@ const MessagingScreen = () => {
         if (now - lastOlderLoadAttemptAtRef.current >= LOAD_OLDER_THROTTLE_MS) {
           lastOlderLoadAttemptAtRef.current = now;
           canTriggerTopLoadRef.current = false;
-          const stopOffset = Math.max(0, currentOffsetY);
-          topLoadAnchorRef.current = {
-            offsetY: stopOffset,
+          const topVisibleMessageDebug = topVisibleMessageDebugRef.current;
+          console.log("[OlderPageFetchTopMessage]", {
+            messageId: topVisibleMessageDebug?.id ?? null,
+            sender: topVisibleMessageDebug?.sender ?? null,
+            snippet: topVisibleMessageDebug?.snippet ?? null,
+            timestamp: topVisibleMessageDebug?.timestamp ?? null,
+            timestampIso:
+              typeof topVisibleMessageDebug?.timestamp === "number"
+                ? new Date(topVisibleMessageDebug.timestamp).toISOString()
+                : null,
+            offsetY: Math.max(0, currentOffsetY),
             contentHeight: nativeEvent.contentSize.height,
-          };
-          requestAnimationFrame(() => {
-            flatListRef.current?.scrollToOffset({
-              offset: stopOffset,
-              animated: false,
-            });
           });
+          shouldLogOlderFetchPostStateRef.current = true;
           void loadOlderMessages();
         }
       }
@@ -293,37 +314,12 @@ const MessagingScreen = () => {
   );
 
   const handleContentSizeChange = useCallback(
-    (_width: number, contentHeight: number) => {
-      const topLoadAnchor = topLoadAnchorRef.current;
-      if (topLoadAnchor) {
-        const deltaHeight = contentHeight - topLoadAnchor.contentHeight;
-        if (Math.abs(deltaHeight) > 0.5) {
-          const anchoredOffset = Math.max(
-            0,
-            topLoadAnchor.offsetY + deltaHeight,
-          );
-          topLoadAnchor.offsetY = anchoredOffset;
-          topLoadAnchor.contentHeight = contentHeight;
-          requestAnimationFrame(() => {
-            flatListRef.current?.scrollToOffset({
-              offset: anchoredOffset,
-              animated: false,
-            });
-          });
-        } else {
-          topLoadAnchor.contentHeight = contentHeight;
-        }
-        if (!isLoadingOlderMessagesRef.current) {
-          topLoadAnchorRef.current = null;
-        }
-        return;
-      }
-
+    () => {
       if (isInitialAutoPinActiveRef.current && !hasUserScrolledRef.current) {
         forceAutoScrollToLatestRef.current = true;
-        flatListRef.current?.scrollToEnd({ animated: false });
+        flatListRef.current?.scrollToEnd({ animated: true });
         requestAnimationFrame(() => {
-          flatListRef.current?.scrollToEnd({ animated: false });
+          flatListRef.current?.scrollToEnd({ animated: true });
         });
         return;
       }
@@ -341,8 +337,45 @@ const MessagingScreen = () => {
     shouldAutoScrollToLatestRef.current = false;
     forceAutoScrollToLatestRef.current = false;
     canTriggerTopLoadRef.current = true;
-    topLoadAnchorRef.current = null;
   }, []);
+
+  const viewabilityConfigRef = useRef({
+    itemVisiblePercentThreshold: 100,
+  });
+
+  const onViewableItemsChangedRef = useRef(
+    ({ viewableItems }: { viewableItems: Array<ViewToken<MessageListItem>> }) => {
+      const firstVisibleMessage = [...viewableItems]
+        .filter(
+          (token) =>
+            token.isViewable === true &&
+            token.item?.type === "message" &&
+            typeof token.index === "number",
+        )
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))[0];
+
+      if (firstVisibleMessage?.item.type === "message") {
+        const message = firstVisibleMessage.item.message;
+        const textValue =
+          typeof message.text === "string" ? message.text.trim() : "";
+        const snippet =
+          textValue.length > 0
+            ? textValue.slice(0, 120)
+            : message.image?.url
+              ? "[image]"
+              : "[no-text]";
+
+        topVisibleMessageDebugRef.current = {
+          id: message.id,
+          sender: message.sender,
+          timestamp: message.timestamp,
+          snippet,
+        };
+      } else {
+        topVisibleMessageDebugRef.current = null;
+      }
+    },
+  );
 
   const syncMyTypingState = useCallback(
     async (isTyping: boolean, targetConversationId?: string) => {
@@ -403,6 +436,32 @@ const MessagingScreen = () => {
     [clearHighlightTimeout],
   );
 
+  useEffect(() => {
+    if (isLoadingOlderMessages || !shouldLogOlderFetchPostStateRef.current) {
+      return;
+    }
+
+    shouldLogOlderFetchPostStateRef.current = false;
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const topVisibleMessageDebug = topVisibleMessageDebugRef.current;
+        console.log("[OlderPageFetchTopMessageAfter]", {
+          messageId: topVisibleMessageDebug?.id ?? null,
+          sender: topVisibleMessageDebug?.sender ?? null,
+          snippet: topVisibleMessageDebug?.snippet ?? null,
+          timestamp: topVisibleMessageDebug?.timestamp ?? null,
+          timestampIso:
+            typeof topVisibleMessageDebug?.timestamp === "number"
+              ? new Date(topVisibleMessageDebug.timestamp).toISOString()
+              : null,
+          offsetY: Math.max(0, lastScrollOffsetYRef.current),
+          contentHeight: lastContentHeightRef.current,
+        });
+      });
+    });
+  }, [isLoadingOlderMessages]);
+
   useFocusEffect(
     useCallback(() => {
       let isActive = true;
@@ -413,8 +472,10 @@ const MessagingScreen = () => {
       hasUserScrolledRef.current = false;
       canTriggerTopLoadRef.current = true;
       clearAllSwipeAutoCloseTimeouts();
-      topLoadAnchorRef.current = null;
+      topVisibleMessageDebugRef.current = null;
+      shouldLogOlderFetchPostStateRef.current = false;
       lastScrollOffsetYRef.current = 0;
+      lastContentHeightRef.current = 0;
       oldestMessageCursorRef.current = null;
       isLoadingOlderMessagesRef.current = false;
       lastOlderLoadAttemptAtRef.current = 0;
@@ -539,8 +600,10 @@ const MessagingScreen = () => {
         isInitialAutoPinActiveRef.current = true;
         hasUserScrolledRef.current = false;
         canTriggerTopLoadRef.current = true;
-        topLoadAnchorRef.current = null;
+        topVisibleMessageDebugRef.current = null;
+        shouldLogOlderFetchPostStateRef.current = false;
         lastScrollOffsetYRef.current = 0;
+        lastContentHeightRef.current = 0;
         oldestMessageCursorRef.current = null;
         isLoadingOlderMessagesRef.current = false;
         lastOlderLoadAttemptAtRef.current = 0;
@@ -893,7 +956,6 @@ const MessagingScreen = () => {
       isInitialAutoPinActiveRef.current = false;
       hasUserScrolledRef.current = true;
       canTriggerTopLoadRef.current = false;
-      topLoadAnchorRef.current = null;
       flatListRef.current?.scrollToIndex({
         index: targetIndex,
         animated: true,
@@ -1033,6 +1095,10 @@ const MessagingScreen = () => {
       keyboardVerticalOffset={Platform.OS === "ios" ? 100 : 0}
     >
       <View style={[styles.container, { flex: 1 }]}>
+        <MiniMapDock
+          contactId={contactIdValue}
+          contactName={contactNameValue}
+        />
         <FlatList
           ref={flatListRef}
           data={messageListItems}
@@ -1040,8 +1106,12 @@ const MessagingScreen = () => {
           onScroll={handleMessagesScroll}
           onScrollBeginDrag={handleMessagesScrollBeginDrag}
           scrollEventThrottle={16}
+          scrollEnabled={!isLoadingOlderMessages}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
+          onViewableItemsChanged={onViewableItemsChangedRef.current}
+          viewabilityConfig={viewabilityConfigRef.current}
+          maintainVisibleContentPosition={{ minIndexForVisible: 0 }}
           onScrollToIndexFailed={({ index, averageItemLength }) => {
             flatListRef.current?.scrollToOffset({
               offset: averageItemLength * index,
@@ -1070,17 +1140,13 @@ const MessagingScreen = () => {
               </View>
             ) : null
           }
-          ListHeaderComponent={
-            isLoadingOlderMessages ? (
-              <View style={styles.dayHeaderRow}>
-                <Text style={styles.dayHeaderText}>
-                  Loading older messages...
-                </Text>
-              </View>
-            ) : null
-          }
           onContentSizeChange={handleContentSizeChange}
         />
+        {isLoadingOlderMessages ? (
+          <View pointerEvents="none" style={styles.olderMessagesLoadingOverlay}>
+            <Text style={styles.dayHeaderText}>Loading older messages...</Text>
+          </View>
+        ) : null}
         <MessageComposer
           currentUserId={currentUserId}
           replyingTo={replyingTo}

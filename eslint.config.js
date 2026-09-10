@@ -5,6 +5,8 @@ const expoConfig = require('eslint-config-expo/flat');
 module.exports = defineConfig([
   expoConfig,
   {
-    ignores: ['dist/*'],
+    // functions/lib is compiled output (gitignored); linting it reports
+    // errors against code nobody edits.
+    ignores: ['dist/*', 'functions/lib/*', 'functions/lib/**/*'],
   },
 ]);

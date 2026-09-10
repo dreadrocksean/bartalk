@@ -5,9 +5,15 @@ import { HapticTab } from "@/components/haptic-tab";
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { Colors } from "@/constants/theme";
 import { useColorScheme } from "@/hooks/use-color-scheme";
+import { useTracking } from "@/tracking/tracking-provider";
 
 const TabLayout = () => {
   const colorScheme = useColorScheme();
+  const { incomingRequests, watchers } = useTracking();
+
+  // A request waiting on me, or someone looking at me right now, is worth a dot
+  // on the tab: the trackee shouldn't have to go looking for either.
+  const trackBadgeCount = incomingRequests.length + watchers.length;
 
   return (
     <Tabs
@@ -20,18 +26,23 @@ const TabLayout = () => {
       <Tabs.Screen
         name="index"
         options={{
-          title: "Home",
+          title: "Chat",
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="house.fill" color={color} />
+            <IconSymbol
+              size={28}
+              name="bubble.left.and.bubble.right.fill"
+              color={color}
+            />
           ),
         }}
       />
       <Tabs.Screen
-        name="explore"
+        name="track"
         options={{
-          title: "Explore",
+          title: "Track",
+          tabBarBadge: trackBadgeCount > 0 ? trackBadgeCount : undefined,
           tabBarIcon: ({ color }) => (
-            <IconSymbol size={28} name="paperplane.fill" color={color} />
+            <IconSymbol size={28} name="location.fill" color={color} />
           ),
         }}
       />

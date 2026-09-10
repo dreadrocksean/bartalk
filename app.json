@@ -40,7 +40,12 @@
       "./plugins/with-rnfirebase-static-framework.js",
       "expo-router",
       "expo-dev-client",
-      "expo-notifications",
+      [
+        "expo-notifications",
+        {
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
       [
         "expo-image-picker",
         {
@@ -69,7 +74,18 @@
           }
         }
       ],
-      "@react-native-google-signin/google-signin"
+      "@react-native-google-signin/google-signin",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "BarTalk shares your location with the people you have approved, including when the app is closed, so they can see you on the map. You are notified every time one of them checks.",
+          "locationWhenInUsePermission": "BarTalk shows your location to the people you have approved while you are using the app. You are notified every time one of them checks.",
+          "locationAlwaysPermission": "BarTalk shares your location with the people you have approved, including when the app is closed. You are notified every time one of them checks.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
@@ -80,6 +96,13 @@
       "eas": {
         "projectId": "35b39fb6-7c51-4ede-9665-5ed38f5037f2"
       }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/35b39fb6-7c51-4ede-9665-5ed38f5037f2",
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "fingerprint"
     }
   }
 }

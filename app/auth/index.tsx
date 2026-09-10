@@ -23,7 +23,11 @@ import { getFirebaseAuth } from "../../firebase";
 import styles from "./styles";
 
 type AuthScreenProps = {
-  onAuthSuccess: () => void;
+  /**
+   * Optional: the session is driven by onAuthStateChanged, so callers that
+   * observe auth state directly don't need to pass anything.
+   */
+  onAuthSuccess?: () => void;
 };
 
 const createNonce = () => {
@@ -98,7 +102,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           await updateUserExpoPushToken(user.uid, expoPushToken);
         } catch {}
       }
-      onAuthSuccess();
+      onAuthSuccess?.();
     } catch (error) {
       let message = "Unknown error";
       if (typeof error === "object" && error && "message" in error) {
@@ -144,7 +148,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
             await updateUserExpoPushToken(user.uid, expoPushToken);
           } catch {}
         }
-        onAuthSuccess();
+        onAuthSuccess?.();
       } else {
         Alert.alert("Google Sign-In cancelled");
       }
@@ -200,7 +204,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           await updateUserExpoPushToken(user.uid, expoPushToken);
         } catch {}
       }
-      onAuthSuccess();
+      onAuthSuccess?.();
     } catch (e: any) {
       console.error("Apple Sign-In Error:", e);
 

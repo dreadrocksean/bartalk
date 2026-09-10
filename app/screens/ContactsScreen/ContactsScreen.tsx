@@ -21,6 +21,7 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { useWatchScope } from "../../../hooks/use-watch-scope";
 import { ThemedText } from "../../../components/themed-text";
 import { IconSymbol } from "../../../components/ui/icon-symbol";
 import { Colors } from "../../../constants/theme";
@@ -59,6 +60,12 @@ type Conversation = {
 
 const ContactsScreen: FC<ContactsScreenProps> = ({ user }) => {
   const router = useRouter();
+
+  // No positions are shown here, so arriving on this screen ends any open watch
+  // — otherwise stepping back from a tracked chat would leave the trackee's
+  // banner lit for a tracker who has stopped looking.
+  useWatchScope("none");
+
   const [menuVisible, setMenuVisible] = useState(false);
   const [contacts, setContacts] = useState<UserDoc[]>([]);
   const [myUser, setMyUser] = useState<UserDoc | null>(null);

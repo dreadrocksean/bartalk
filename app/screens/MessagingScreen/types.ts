@@ -36,11 +36,6 @@ export type MessageListItem =
       message: MessageDoc;
     };
 
-export type TopLoadAnchor = {
-  offsetY: number;
-  contentHeight: number;
-};
-
 export type SwipeAutoCloseTimeoutsMap = Map<
   string,
   ReturnType<typeof setTimeout>

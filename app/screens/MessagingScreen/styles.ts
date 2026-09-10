@@ -21,6 +21,12 @@ export default StyleSheet.create({
     paddingVertical: unity * 4,
     overflow: "hidden",
   },
+  olderMessagesLoadingOverlay: {
+    position: "absolute",
+    top: unity * 6,
+    alignSelf: "center",
+    zIndex: 5,
+  },
   messageSwipeRow: {
     width: "100%",
     overflow: "visible",

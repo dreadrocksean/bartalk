@@ -1,0 +1,29 @@
+{
+  "indexes": [
+    {
+      "collectionGroup": "watchSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "trackeeId", "order": "ASCENDING"},
+        {"fieldPath": "active", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "watchSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "active", "order": "ASCENDING"},
+        {"fieldPath": "lastHeartbeatAt", "order": "ASCENDING"}
+      ]
+    },
+    {
+      "collectionGroup": "trackingEvents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {"fieldPath": "trackeeId", "order": "ASCENDING"},
+        {"fieldPath": "startedAt", "order": "DESCENDING"}
+      ]
+    }
+  ],
+  "fieldOverrides": []
+}

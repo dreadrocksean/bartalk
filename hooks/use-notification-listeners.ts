@@ -29,7 +29,16 @@ export function useNotificationListeners() {
       Notifications.addNotificationResponseReceivedListener((response) => {
         const data = response.notification.request.content.data as {
           senderId?: string;
+          type?: string;
         };
+
+        // "Someone checked your location" opens the Track tab, where the
+        // trackee can see who is watching and stop it.
+        if (data?.type === "watch-started") {
+          router.push("/(tabs)/track");
+          return;
+        }
+
         if (data?.senderId) {
           router.push({
             pathname: "/screens/MessagingScreen",

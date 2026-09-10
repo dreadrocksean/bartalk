@@ -1,34 +1,15 @@
 /**
- * Firebase Cloud Function for sending Expo push notifications on new messages.
+ * Firebase Cloud Functions for BarTalk.
  */
 
-import * as admin from "firebase-admin";
 import * as functions from "firebase-functions/v1";
 import {runWith} from "firebase-functions/v1";
 
-admin.initializeApp();
-const db = admin.firestore();
+import {getUserPushTarget, sendExpoPush} from "./push";
 
-type ExpoPushTicket = {
-  status?: string;
-  id?: string;
-  message?: string;
-  details?: unknown;
-};
-
-type ExpoPushSendResponse = {
-  data?: ExpoPushTicket | ExpoPushTicket[];
-  errors?: unknown[];
-};
+export {onWatchSessionWrite, reapStaleWatchSessions} from "./tracking";
 
 const ANDROID_NOTIFICATION_CHANNEL_ID = "messages";
-
-const getPushTickets = (value: ExpoPushSendResponse): ExpoPushTicket[] => {
-  if (!value.data) {
-    return [];
-  }
-  return Array.isArray(value.data) ? value.data : [value.data];
-};
 
 export const sendPushNotification = runWith({maxInstances: 10})
   .firestore
@@ -77,12 +58,8 @@ export const sendPushNotification = runWith({maxInstances: 10})
         return null;
       }
 
-      const userSnap = await db
-        .collection("Users")
-        .doc(normalizedReceiverId)
-        .get();
-      const expoPushToken = userSnap.data()?.expoPushToken;
-      if (typeof expoPushToken !== "string" || expoPushToken.length === 0) {
+      const target = await getUserPushTarget(normalizedReceiverId);
+      if (!target) {
         functions.logger.info("No server-side push token found for receiver", {
           receiverId: normalizedReceiverId,
           messageId: context.params.messageId,
@@ -93,7 +70,7 @@ export const sendPushNotification = runWith({maxInstances: 10})
         typeof message.senderPushToken === "string" ?
           message.senderPushToken :
           null;
-      if (senderPushToken && senderPushToken === expoPushToken) {
+      if (senderPushToken && senderPushToken === target.token) {
         functions.logger.info(
           "Skipping push because receiver token matches sender device token",
           {
@@ -111,8 +88,8 @@ export const sendPushNotification = runWith({maxInstances: 10})
       const resolvedKind =
         typeof message.kind === "string" ? message.kind :
           hasImage && text.length > 0 ? "mixed" :
-          hasImage ? "image" :
-          "text";
+            hasImage ? "image" :
+              "text";
       const defaultBody = hasImage ? "📷 Photo" : "You have a new message";
       const rawBody =
         text.length > 0 ? hasImage ? `📷 ${text}` : text : defaultBody;
@@ -122,14 +99,7 @@ export const sendPushNotification = runWith({maxInstances: 10})
         typeof message.replyTo?.messageId === "string" ?
           message.replyTo.messageId :
           null;
-      const payloadData: {
-        conversationId: string;
-        senderId: string;
-        receiverId: string;
-        messageId: string;
-        messageKind: string;
-        replyToMessageId?: string;
-      } = {
+      const payloadData: Record<string, string> = {
         conversationId: context.params.conversationId,
         senderId,
         receiverId: normalizedReceiverId,
@@ -140,78 +110,24 @@ export const sendPushNotification = runWith({maxInstances: 10})
         payloadData.replyToMessageId = replyToMessageId;
       }
 
-      const payload = {
-        to: expoPushToken,
-        sound: "default",
-        channelId: ANDROID_NOTIFICATION_CHANNEL_ID,
-        title: replyToMessageId ?
-          "New reply" :
-          hasImage ?
-            "New photo" :
-            "New message",
-        body,
-        data: payloadData,
-      };
-
-      try {
-        const response = await fetch("https://exp.host/--/api/v2/push/send", {
-          method: "POST",
-          headers: {
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(payload),
-        });
-        const rawBody = await response.text();
-
-        if (!response.ok) {
-          functions.logger.error("Expo push request failed", {
-            status: response.status,
-            body: rawBody,
-            receiverId: normalizedReceiverId,
-          });
-          return null;
-        }
-
-        let jsonResponse: ExpoPushSendResponse;
-        try {
-          jsonResponse = JSON.parse(rawBody) as ExpoPushSendResponse;
-        } catch {
-          functions.logger.error("Expo push response was not valid JSON", {
-            body: rawBody,
-            receiverId: normalizedReceiverId,
-          });
-          return null;
-        }
-
-        const tickets = getPushTickets(jsonResponse);
-        const failedTickets = tickets.filter(
-          (ticket) => ticket.status !== "ok",
-        );
-
-        if (
-          failedTickets.length > 0 ||
-          (jsonResponse.errors?.length ?? 0) > 0
-        ) {
-          functions.logger.error("Expo push returned ticket errors", {
-            receiverId: normalizedReceiverId,
-            failedTickets,
-            errors: jsonResponse.errors ?? [],
-          });
-          return null;
-        }
-
-        functions.logger.info("Expo push sent", {
+      await sendExpoPush(
+        {
+          to: target.token,
+          sound: "default",
+          channelId: ANDROID_NOTIFICATION_CHANNEL_ID,
+          title: replyToMessageId ?
+            "New reply" :
+            hasImage ?
+              "New photo" :
+              "New message",
+          body,
+          data: payloadData,
+        },
+        {
           receiverId: normalizedReceiverId,
-          ticketCount: tickets.length,
-          ticketIds: tickets.map((ticket) => ticket.id).filter(Boolean),
-        });
-      } catch (error) {
-        functions.logger.error("Expo push request threw an error", {
-          receiverId: normalizedReceiverId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
+          messageId: context.params.messageId,
+        },
+      );
 
       return null;
     },

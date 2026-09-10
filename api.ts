@@ -14,8 +14,9 @@ import firestore, {
   query,
   startAfter,
   updateDoc,
+  where,
 } from "@react-native-firebase/firestore";
-import { Alert } from "react-native";
+import { Alert, Platform } from "react-native";
 import type {
   MessageImage,
   MessageKind,
@@ -54,7 +55,13 @@ export const getOrCreateConversation = async (
   userBId: string,
 ) => {
   const conversationsRef = getConversationsRef();
-  const q = query(conversationsRef, orderBy("participants"));
+  // Scoped to the caller's own conversations: reading the whole collection
+  // would be rejected by the security rules, which only expose a conversation
+  // to its participants.
+  const q = query(
+    conversationsRef,
+    where("participants", "array-contains", userAId),
+  );
   const snapshot = await getDocs(q);
   const convo = snapshot.docs.find(
     (doc: FirebaseFirestoreTypes.QueryDocumentSnapshot) => {
@@ -112,7 +119,8 @@ export const listenForConversation = (
 ) => {
   const convoDoc = doc(getDb(), "conversations", conversationId);
   return onSnapshot(convoDoc, (snapshot) => {
-    callback(snapshot.exists() ? snapshot.data() ?? null : null);
+    // A failed listener calls back with a null snapshot rather than throwing.
+    callback(snapshot?.exists() ? snapshot.data() ?? null : null);
   });
 };
 
@@ -624,7 +632,10 @@ export const updateUserExpoPushToken = async (
   expoPushToken: string,
 ) => {
   const userDoc = doc(getDb(), "Users", uid);
-  await updateDoc(userDoc, { expoPushToken });
+  // Apple wants background/silent pushes at normal priority while Android needs
+  // high priority to survive doze, and an Expo token doesn't say which platform
+  // it came from — so record it here.
+  await updateDoc(userDoc, { expoPushToken, expoPushPlatform: Platform.OS });
 };
 
 export const getUserExpoPushToken = async (uid: string) => {
