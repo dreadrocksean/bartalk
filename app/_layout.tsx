@@ -75,10 +75,14 @@ const RootLayout = () => {
 };
 
 const styles = StyleSheet.create({
+  // Matches the native splash background so the handover from the launch
+  // screen to the first JS frame is invisible. These two colours have to stay
+  // in step: the splash is compiled into the binary and this one ships over the
+  // air, so a change to either alone shows up as a flash on startup.
   loading: {
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#e5e5ea",
+    backgroundColor: "#000000",
   },
 });
 

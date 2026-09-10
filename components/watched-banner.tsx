@@ -94,7 +94,7 @@ export const WatchedBanner = () => {
       pointerEvents="box-none"
     >
       <Pressable
-        onPress={() => router.push("/(tabs)/track")}
+        onPress={() => router.push("/(tabs)")}
         style={{
           flexDirection: "row",
           alignItems: "center",

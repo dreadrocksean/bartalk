@@ -50,12 +50,32 @@ service cloud.firestore {
       ) && linkFor(trackerId, trackeeId).status == 'active';
     }
 
+    // The hard ceiling on one look. Mirrors WATCH_SESSION_MAX_MS in
+    // tracking/constants.ts; both must move together.
+    function watchCeilingMs() {
+      return 60000;
+    }
+
+    function watchSession(trackerId, trackeeId) {
+      return get(
+        /databases/$(database)/documents/watchSessions/$(linkId(trackerId, trackeeId))
+      ).data;
+    }
+
+    // A look is live only while it is both open and inside the ceiling. The
+    // second half is what makes the ceiling real rather than a courtesy: a
+    // tracker running a modified client can keep the session marked active and
+    // keep heartbeating, and still be denied the position the moment the minute
+    // is up. Ending is not something the app does — it is something the
+    // database does.
     function isWatching(trackerId, trackeeId) {
       return exists(
         /databases/$(database)/documents/watchSessions/$(linkId(trackerId, trackeeId))
-      ) && get(
-        /databases/$(database)/documents/watchSessions/$(linkId(trackerId, trackeeId))
-      ).data.active == true;
+      )
+        && watchSession(trackerId, trackeeId).active == true
+        && watchSession(trackerId, trackeeId).startedAt is number
+        && nowMs() - watchSession(trackerId, trackeeId).startedAt
+             < watchCeilingMs();
     }
 
     // ---------------- Users ----------------
@@ -192,11 +212,20 @@ service cloud.firestore {
         && (
           // Reopening a session, or heartbeating / closing an open one.
           (request.resource.data.active == true
-            // startedAt is only checked when it actually changes: a long watch
-            // legitimately has an old start time, and every heartbeat would
-            // otherwise be rejected once it aged past the window.
-            && (request.resource.data.startedAt == resource.data.startedAt
-              || isPlausibleTimestamp(request.resource.data.startedAt))
+            && (
+              // Reopening a closed session. A fresh start time is allowed here
+              // and only here, because this same write flips active back on —
+              // which is exactly what makes the Cloud Function notify again.
+              (resource.data.active == false
+                && isPlausibleTimestamp(request.resource.data.startedAt))
+              // Heartbeating a live one. startedAt is immutable while active,
+              // or a tracker could hold one session open and keep sliding its
+              // start time forward, watching indefinitely without ever
+              // crossing the inactive -> active edge that notifies. Restarting
+              // must cost a close, and a close is announced too.
+              || (request.resource.data.startedAt == resource.data.startedAt
+                && nowMs() - resource.data.startedAt < watchCeilingMs())
+            )
             && isPlausibleTimestamp(request.resource.data.lastHeartbeatAt)
             && hasActiveLink(uid(), resource.data.trackeeId))
           || request.resource.data.active == false

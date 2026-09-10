@@ -5,6 +5,7 @@
 import * as functions from "firebase-functions/v1";
 import {runWith} from "firebase-functions/v1";
 
+import {admin, db} from "./admin";
 import {getUserPushTarget, sendExpoPush} from "./push";
 
 export {onWatchSessionWrite, reapStaleWatchSessions} from "./tracking";
@@ -56,6 +57,31 @@ export const sendPushNotification = runWith({maxInstances: 10})
           },
         );
         return null;
+      }
+
+      // The badge is counted here, before any of the reasons a push might not
+      // be sent. A receiver with no push token, or one whose device matches the
+      // sender's, still has an unread message — bailing out below must not cost
+      // them the count. Reset to zero when they open the conversation.
+      try {
+        await db
+          .collection("conversations")
+          .doc(context.params.conversationId as string)
+          .set(
+            {
+              unreadCounts: {
+                [normalizedReceiverId]: admin.firestore.FieldValue.increment(1),
+              },
+            },
+            {merge: true},
+          );
+      } catch (error) {
+        // A failed count must never swallow the notification itself.
+        functions.logger.error("Failed to increment unread count", {
+          conversationId: context.params.conversationId,
+          receiverId: normalizedReceiverId,
+          error,
+        });
       }
 
       const target = await getUserPushTarget(normalizedReceiverId);

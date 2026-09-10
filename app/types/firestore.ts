@@ -78,6 +78,8 @@ export type ConversationDoc = {
   participants: string[];
   lastMessage?: MessageDoc;
   readReceipts?: ReadReceipts;
+  /** Server-maintained unread totals, keyed by recipient id. */
+  unreadCounts?: { [userId: string]: number };
   typingStatus?: TypingStatuses;
 };
 

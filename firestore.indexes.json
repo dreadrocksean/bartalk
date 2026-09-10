@@ -4,24 +4,56 @@
       "collectionGroup": "watchSessions",
       "queryScope": "COLLECTION",
       "fields": [
-        {"fieldPath": "trackeeId", "order": "ASCENDING"},
-        {"fieldPath": "active", "order": "ASCENDING"}
+        {
+          "fieldPath": "trackeeId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "active",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "watchSessions",
       "queryScope": "COLLECTION",
       "fields": [
-        {"fieldPath": "active", "order": "ASCENDING"},
-        {"fieldPath": "lastHeartbeatAt", "order": "ASCENDING"}
+        {
+          "fieldPath": "active",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "lastHeartbeatAt",
+          "order": "ASCENDING"
+        }
       ]
     },
     {
       "collectionGroup": "trackingEvents",
       "queryScope": "COLLECTION",
       "fields": [
-        {"fieldPath": "trackeeId", "order": "ASCENDING"},
-        {"fieldPath": "startedAt", "order": "DESCENDING"}
+        {
+          "fieldPath": "trackeeId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startedAt",
+          "order": "DESCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "watchSessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "active",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "startedAt",
+          "order": "ASCENDING"
+        }
       ]
     }
   ],

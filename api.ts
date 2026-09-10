@@ -104,6 +104,11 @@ export const markConversationRead = async ({
       lastMessageTimestamp,
       lastReadTimestamp,
     },
+    // The badge is a server-side counter incremented per delivered message, so
+    // opening the conversation has to clear it explicitly. The read receipt
+    // above is a pointer and can't be counted from without a query per
+    // conversation, which is why the two live side by side.
+    [`unreadCounts.${userId}`]: 0,
   };
   try {
     await updateDoc(convoDoc, updateData);
@@ -646,4 +651,61 @@ export const getUserExpoPushToken = async (uid: string) => {
   }
   const userData = userSnap.data();
   return userData?.expoPushToken ?? null;
+};
+
+// ***************************//
+// -------Unread counts-------//
+// ***************************//
+
+/** Unread totals keyed by the *other* participant's id. */
+export type UnreadByContact = Record<string, number>;
+
+/**
+ * One listener covering every conversation this user is in, so a badge on a
+ * contact row costs a field read rather than a query per row. The count itself
+ * is maintained by the sendPushNotification trigger — a client can't be trusted
+ * to count messages it may never have received.
+ */
+export const listenForUnreadCounts = (
+  userId: string,
+  callback: (counts: UnreadByContact) => void,
+) => {
+  const q = query(
+    getConversationsRef(),
+    where("participants", "array-contains", userId),
+  );
+
+  return onSnapshot(
+    q,
+    (snapshot: FirebaseFirestoreTypes.QuerySnapshot) => {
+      if (!snapshot) {
+        callback({});
+        return;
+      }
+      const counts: UnreadByContact = {};
+      snapshot.docs.forEach(
+        (convo: FirebaseFirestoreTypes.QueryDocumentSnapshot) => {
+          const data = convo.data() ?? {};
+          const participants = Array.isArray(data.participants) ?
+            data.participants :
+            [];
+          const other = participants.find(
+            (id: unknown) => typeof id === "string" && id !== userId,
+          );
+          if (typeof other !== "string") return;
+
+          const raw = data.unreadCounts?.[userId];
+          const count =
+            typeof raw === "number" && Number.isFinite(raw) && raw > 0 ?
+              Math.floor(raw) :
+              0;
+          if (count > 0) {
+            counts[other] = (counts[other] ?? 0) + count;
+          }
+        },
+      );
+      callback(counts);
+    },
+    () => callback({}),
+  );
 };

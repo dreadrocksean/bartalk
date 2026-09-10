@@ -111,6 +111,27 @@ export default StyleSheet.create({
   actionButtonTextPrimary: { color: "#fff" },
   actionButtonTextDanger: { color: "#B00020" },
 
+  // Sits inside the button rather than pinned to its corner: the count is part
+  // of what the button says ("Chat, 3 waiting"), not a decoration floating over
+  // it, and an inline badge can't clip against the row's edge.
+  actionBadge: {
+    minWidth: unity * 20,
+    height: unity * 20,
+    borderRadius: unity * 10,
+    paddingHorizontal: unity * 6,
+    backgroundColor: "#E5342B",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  actionBadgeText: {
+    color: "#fff",
+    fontSize: unity * 12,
+    fontWeight: "800",
+    // Digits in a pill look low without this on iOS.
+    includeFontPadding: false,
+    textAlign: "center",
+  },
+
   requestActions: { flexDirection: "row", gap: unity * 8 },
   requestBody: {
     fontSize: unity * 13,

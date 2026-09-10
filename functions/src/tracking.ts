@@ -14,9 +14,20 @@ import {runWith} from "firebase-functions/v1";
 import {db} from "./admin";
 import {getUserPushTarget, sendExpoPush} from "./push";
 
-/** Mirrors tracking/constants.ts on the client. */
-const WATCH_NOTIFY_COOLDOWN_MS = 120_000;
-const WATCH_SESSION_STALE_MS = 90_000;
+/** Mirrors tracking/constants.ts on the client, and watchCeilingMs() in
+ * firestore.rules. All three must move together. */
+const WATCH_SESSION_MAX_MS = 60_000;
+
+/** Mirrors WATCH_HEARTBEAT_MS on the client. The resolution of "still here". */
+const WATCH_HEARTBEAT_MS = 20_000;
+
+/**
+ * There is no notification cooldown. Every session that opens notifies, every
+ * session that closes notifies, and sessions cannot exceed the ceiling above.
+ * A cooldown made sense while a look was unbounded; once looks are finite it
+ * becomes the thing a determined tracker hides inside, by reopening the map
+ * just often enough to stay under it.
+ */
 
 /**
  * Apple advises no more than two or three background pushes per hour, and a
@@ -41,19 +52,6 @@ const notifyTrackee = async (
   }
 
   const now = Date.now();
-  const notifiedAt =
-    typeof session.notifiedAt === "number" ? session.notifiedAt : 0;
-
-  // Backgrounding and reopening the map within the cooldown is one look, not
-  // two. Without this the trackee learns to ignore the alerts, which defeats
-  // the whole feature.
-  if (now - notifiedAt < WATCH_NOTIFY_COOLDOWN_MS) {
-    functions.logger.info("Watch notification suppressed by cooldown", {
-      sessionId,
-      sinceLastMs: now - notifiedAt,
-    });
-    return;
-  }
 
   const trackerName =
     typeof session.trackerName === "string" && session.trackerName.length > 0 ?
@@ -68,7 +66,8 @@ const notifyTrackee = async (
       {
         to: target.token,
         title: "👀 Location checked",
-        body: `${trackerName} is looking at your location right now.`,
+        body: `${trackerName} is looking at your location. This ends in ` +
+          `${Math.round(WATCH_SESSION_MAX_MS / 1000)} seconds.`,
         sound: "default",
         channelId: "messages",
         priority: "high",
@@ -109,17 +108,91 @@ const notifyTrackee = async (
   await db.collection("watchSessions").doc(sessionId).update(updates);
 };
 
+const formatDuration = (ms: number): string => {
+  const seconds = Math.max(0, Math.round(ms / 1000));
+  if (seconds < 60) {
+    return `${seconds} second${seconds === 1 ? "" : "s"}`;
+  }
+  const minutes = Math.round(seconds / 60);
+  return `${minutes} minute${minutes === 1 ? "" : "s"}`;
+};
+
+/**
+ * The other half of the promise. Being told a look started, and never told it
+ * stopped, leaves the trackee assuming they are still being watched — which is
+ * both wrong and the exact anxiety this feature exists to remove. The duration
+ * goes in the body because it is the fact worth keeping: not "someone looked",
+ * but "someone looked for this long".
+ *
+ * @param {string} sessionId Id of the watch session that just closed.
+ * @param {FirebaseFirestore.DocumentData} session The closed session document.
+ * @param {number} durationMs How long the position was actually served for.
+ * @return {Promise<void>} Resolves once the push has been handed to Expo.
+ */
+const notifyWatchEnded = async (
+  sessionId: string,
+  session: FirebaseFirestore.DocumentData,
+  durationMs: number,
+): Promise<void> => {
+  const trackeeId =
+    typeof session.trackeeId === "string" ? session.trackeeId.trim() : "";
+  if (trackeeId.length === 0) {
+    return;
+  }
+
+  const trackerName =
+    typeof session.trackerName === "string" && session.trackerName.length > 0 ?
+      session.trackerName :
+      "Someone";
+
+  const target = await getUserPushTarget(trackeeId);
+  if (!target) {
+    functions.logger.info("Trackee has no push token", {trackeeId, sessionId});
+    return;
+  }
+
+  await sendExpoPush(
+    {
+      to: target.token,
+      title: "Location no longer shared",
+      body: `${trackerName} checked your location for ` +
+        `${formatDuration(durationMs)}. They are no longer viewing it.`,
+      sound: "default",
+      channelId: "messages",
+      priority: "high",
+      data: {
+        type: "watch-ended",
+        sessionId,
+        trackerId: typeof session.trackerId === "string" ?
+          session.trackerId :
+          "",
+        trackerName,
+        durationMs: String(Math.max(0, Math.round(durationMs))),
+      },
+    },
+    {sessionId, trackeeId, kind: "watch-ended"},
+  );
+};
+
 const recordCompletedWatch = async (
   sessionId: string,
   session: FirebaseFirestore.DocumentData,
-): Promise<void> => {
+): Promise<number | null> => {
   const startedAt =
     typeof session.startedAt === "number" ? session.startedAt : 0;
   if (startedAt === 0) {
-    return;
+    return null;
   }
   const endedAt =
     typeof session.endedAt === "number" ? session.endedAt : Date.now();
+
+  // A session can never have been served for longer than the ceiling, so the
+  // audit entry must not claim it was — a reaper running a minute late would
+  // otherwise write a two-minute look that the rules never actually allowed.
+  const durationMs = Math.min(
+    Math.max(0, endedAt - startedAt),
+    WATCH_SESSION_MAX_MS,
+  );
 
   await db.collection("trackingEvents").add({
     trackeeId: session.trackeeId,
@@ -127,8 +200,10 @@ const recordCompletedWatch = async (
     trackerName: session.trackerName ?? "Someone",
     startedAt,
     endedAt,
-    durationMs: Math.max(0, endedAt - startedAt),
+    durationMs,
   });
+
+  return durationMs;
 };
 
 export const onWatchSessionWrite = runWith({maxInstances: 10})
@@ -155,7 +230,10 @@ export const onWatchSessionWrite = runWith({maxInstances: 10})
       }
 
       if (wasActive && !isActive) {
-        await recordCompletedWatch(sessionId, after);
+        const durationMs = await recordCompletedWatch(sessionId, after);
+        if (durationMs !== null) {
+          await notifyWatchEnded(sessionId, after, durationMs);
+        }
       }
 
       return null;
@@ -163,40 +241,57 @@ export const onWatchSessionWrite = runWith({maxInstances: 10})
   );
 
 /**
- * Closes sessions whose tracker stopped heartbeating — a force-quit, a crash,
- * or a dead network. Without this the trackee would keep seeing "someone is
- * watching you" for a tracker who has long gone, and the audit entry for that
- * look would never be written.
+ * Closes every session that has reached the ceiling, and with it every session
+ * whose tracker stopped heartbeating — a force-quit, a crash, a dead network.
+ * One query covers both now that no session may outlive the ceiling.
+ *
+ * The rules already stop serving positions at exactly the ceiling, so this is
+ * not what enforces it. What this does is make the ending *visible*: it writes
+ * the audit entry and fires the "no longer viewing" notification for trackers
+ * whose app never got the chance to close the session politely.
  */
 export const reapStaleWatchSessions = functions.pubsub
   .schedule("every 1 minutes")
   .onRun(async () => {
-    const cutoff = Date.now() - WATCH_SESSION_STALE_MS;
-    const stale = await db
+    const cutoff = Date.now() - WATCH_SESSION_MAX_MS;
+    const expired = await db
       .collection("watchSessions")
       .where("active", "==", true)
-      .where("lastHeartbeatAt", "<", cutoff)
+      .where("startedAt", "<", cutoff)
       .limit(REAPER_BATCH_LIMIT)
       .get();
 
-    if (stale.empty) {
+    if (expired.empty) {
       return null;
     }
 
     const batch = db.batch();
-    stale.docs.forEach((doc) => {
-      const lastHeartbeatAt = doc.data().lastHeartbeatAt;
+    expired.docs.forEach((doc) => {
+      const data = doc.data();
+      const startedAt =
+        typeof data.startedAt === "number" ? data.startedAt : cutoff;
+      const lastHeartbeatAt =
+        typeof data.lastHeartbeatAt === "number" ?
+          data.lastHeartbeatAt :
+          startedAt;
       batch.update(doc.ref, {
         active: false,
-        // Credit the watch only up to the last proof of life.
-        endedAt:
-          typeof lastHeartbeatAt === "number" ? lastHeartbeatAt : cutoff,
+        // A heartbeat proves the tracker was still looking at that moment, and
+        // proves nothing about the interval after it — they may have watched
+        // right up to the next one that never came. That uncertainty is
+        // resolved in the trackee's favour: this is their record of being
+        // looked at, and under-reporting it is the failure that matters.
+        // Capped at the ceiling, which is the longest the position was served.
+        endedAt: Math.min(
+          startedAt + WATCH_SESSION_MAX_MS,
+          lastHeartbeatAt + WATCH_HEARTBEAT_MS,
+        ),
       });
     });
     await batch.commit();
 
-    functions.logger.info("Reaped stale watch sessions", {
-      count: stale.size,
+    functions.logger.info("Reaped expired watch sessions", {
+      count: expired.size,
     });
     return null;
   });

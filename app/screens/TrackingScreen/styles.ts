@@ -70,6 +70,79 @@ export default StyleSheet.create({
   },
   watchedChipAge: { fontSize: unity * 11, color: Colors.light.icon },
 
+  // -------- The ceiling on a look --------
+  expiryChip: {
+    flexDirection: "row",
+    alignItems: "center",
+    alignSelf: "flex-start",
+    backgroundColor: "#FFF1DB",
+    borderRadius: unity * 16,
+    paddingVertical: unity * 7,
+    paddingHorizontal: unity * 11,
+    gap: unity * 7,
+    borderWidth: unity * 1,
+    borderColor: "#E8C48B",
+  },
+  expiryChipText: {
+    fontSize: unity * 13,
+    fontWeight: "600",
+    color: "#8A4B00",
+  },
+  endedCard: {
+    alignSelf: "stretch",
+    backgroundColor: "#fff",
+    borderRadius: unity * 14,
+    paddingVertical: unity * 12,
+    paddingHorizontal: unity * 14,
+    gap: unity * 10,
+    borderWidth: unity * 1,
+    borderColor: Colors.light.border,
+    shadowColor: "#000",
+    shadowOpacity: 0.12,
+    shadowRadius: unity * 8,
+    shadowOffset: { width: 0, height: unity * 2 },
+    elevation: 3,
+  },
+  endedHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: unity * 7,
+  },
+  endedTitle: {
+    fontSize: unity * 13,
+    fontWeight: "700",
+    color: Colors.light.text,
+    letterSpacing: unity * 0.3,
+  },
+  endedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: unity * 10,
+  },
+  endedName: {
+    flexShrink: 1,
+    fontSize: unity * 15,
+    fontWeight: "600",
+    color: Colors.light.text,
+  },
+  resumeButton: {
+    backgroundColor: Colors.light.tint,
+    borderRadius: unity * 14,
+    paddingVertical: unity * 7,
+    paddingHorizontal: unity * 13,
+  },
+  resumeButtonText: {
+    color: "#fff",
+    fontSize: unity * 13,
+    fontWeight: "700",
+  },
+  endedFootnote: {
+    fontSize: unity * 11,
+    lineHeight: unity * 15,
+    color: Colors.light.icon,
+  },
+
   // -------- Other trackees dropdown --------
   dropdownAnchor: {
     flexDirection: "row",

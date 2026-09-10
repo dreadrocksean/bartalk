@@ -11,8 +11,35 @@ export const WATCH_HEARTBEAT_MS = 20_000;
  */
 export const WATCH_SESSION_STALE_MS = 90_000;
 
-/** Re-opening the map within this window does not re-notify the trackee. */
-export const WATCH_NOTIFY_COOLDOWN_MS = 120_000;
+/**
+ * The hard ceiling on a single look. A watch session ends here whether or not
+ * the tracker does anything, and firestore.rules stops serving the position at
+ * the same instant — so this is a property of the system, not a courtesy the
+ * app extends.
+ *
+ * Without it the notification is close to meaningless: the trackee is told once
+ * that someone started looking, and never told they are still being looked at
+ * an hour later. Bounding the look is what makes "you were checked on" a fact
+ * with an end, rather than the beginning of open-ended surveillance.
+ */
+export const WATCH_SESSION_MAX_MS = 60_000;
+
+/**
+ * How close to the ceiling before the tracker is warned it is about to end.
+ * Long enough to finish reading the map, short enough not to be a countdown
+ * they sit and wait out.
+ */
+export const WATCH_EXPIRY_WARNING_MS = 15_000;
+
+/**
+ * There is deliberately no re-watch cooldown. A tracker may look again the
+ * moment a session ends — and every new session notifies the trackee, with no
+ * suppression window. The old cooldown was worse than nothing once sessions
+ * became finite: at 120s it was twice the 60s ceiling, so a tracker who
+ * reopened the map every minute would have watched continuously while the
+ * trackee was told about half of it. Frequency is not the thing being
+ * limited here; silence is.
+ */
 
 /** Background publishing while at least one link is active but nobody watches. */
 export const IDLE_LOCATION_INTERVAL_MS = 60_000;

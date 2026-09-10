@@ -9,6 +9,7 @@ import { Colors } from "../../../constants/theme";
 import { useAutoFitMap } from "../../../hooks/use-auto-fit-map";
 import { useMyPosition } from "../../../hooks/use-my-position";
 import { useTrackeeLocations } from "../../../hooks/use-trackee-locations";
+import { useWatchCountdown } from "../../../hooks/use-watch-countdown";
 import { useWatchScope } from "../../../hooks/use-watch-scope";
 import { formatAge } from "../../../tracking/format";
 import { useTracking, type WatchTarget } from "../../../tracking/tracking-provider";
@@ -19,6 +20,8 @@ import {
   type TrackeeOption,
 } from "./components/OtherTrackeesMenu";
 import { TrackeeMarker } from "./components/TrackeeMarker";
+import { WatchEndedCard } from "./components/WatchEndedCard";
+import { WatchExpiryChip } from "./components/WatchExpiryChip";
 import { WatchNoticeChip } from "./components/WatchNoticeChip";
 import styles from "./styles";
 
@@ -35,8 +38,10 @@ const TrackingScreen = () => {
   const {
     trackees,
     activeWatches,
+    expiredWatches,
     addWatchTarget,
     removeWatchTarget,
+    resumeWatch,
   } = useTracking();
 
   const requestedTarget = useMemo<WatchTarget[]>(() => {
@@ -75,6 +80,8 @@ const TrackingScreen = () => {
 
   const { mapRef, isManual, secondsRemaining, resumeAutoFit, autoFitMapProps } =
     useAutoFitMap(coordinates);
+  const { secondsRemaining: watchSecondsRemaining, isEnding } =
+    useWatchCountdown(activeWatches);
 
   useEffect(() => {
     navigation.setOptions({ title: "Track", headerBackTitle: "Trackees" });
@@ -94,13 +101,19 @@ const TrackingScreen = () => {
   const otherTrackees = useMemo<TrackeeOption[]>(
     () =>
       trackees
-        .filter((link) => !watchedIds.includes(link.trackeeId))
+        .filter(
+          (link) =>
+            !watchedIds.includes(link.trackeeId) &&
+            !expiredWatches.some(
+              (watch) => watch.trackeeId === link.trackeeId,
+            ),
+        )
         .map((link) => ({
           trackeeId: link.trackeeId,
           name: link.trackeeName,
           paused: link.pausedByTrackee,
         })),
-    [trackees, watchedIds],
+    [expiredWatches, trackees, watchedIds],
   );
 
   if (trackees.length === 0) {
@@ -150,6 +163,12 @@ const TrackingScreen = () => {
         <WatchNoticeChip
           names={activeWatches.map((watch) => watch.trackeeName)}
         />
+
+        {isEnding ? (
+          <WatchExpiryChip secondsRemaining={watchSecondsRemaining} />
+        ) : null}
+
+        <WatchEndedCard expired={expiredWatches} onResume={resumeWatch} />
 
         <View style={styles.watchedRow}>
           {activeWatches.map((watch) => {

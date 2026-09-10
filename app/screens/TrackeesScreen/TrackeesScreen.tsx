@@ -5,6 +5,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 
 import { IconSymbol } from "../../../components/ui/icon-symbol";
 import { useTrackingEvents } from "../../../hooks/use-tracking-events";
+import { useUnreadCounts } from "../../../hooks/use-unread-counts";
 import { useWatchScope } from "../../../hooks/use-watch-scope";
 import {
   requestTrackingLink,
@@ -33,6 +34,7 @@ const TrackeesScreen = () => {
     outgoingRequests,
   } = useTracking();
   const events = useTrackingEvents(userId);
+  const { counts: unreadCounts } = useUnreadCounts(userId);
   const [isPickerVisible, setIsPickerVisible] = useState(false);
 
   // This screen shows nobody's position, so being here ends any open session —
@@ -194,6 +196,7 @@ const TrackeesScreen = () => {
                     <RowButton
                       label="Chat"
                       icon="bubble.left.and.bubble.right.fill"
+                      badgeCount={unreadCounts[link.trackeeId] ?? 0}
                       onPress={() => openChat(link)}
                     />
                     <RowButton

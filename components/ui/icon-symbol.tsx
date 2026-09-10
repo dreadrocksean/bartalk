@@ -32,6 +32,8 @@ const MAPPING = {
   'map.fill': 'map',
   'checkmark': 'check',
   'exclamationmark.triangle.fill': 'warning',
+  'timer': 'timer',
+  'eye.slash.fill': 'visibility-off',
 } as IconMapping;
 
 /**

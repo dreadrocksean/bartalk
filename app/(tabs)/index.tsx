@@ -1,10 +1,6 @@
-import ContactsScreen from "../screens/ContactsScreen/ContactsScreen";
-import { useAuthSession } from "@/hooks/use-auth-session";
+import TrackeesScreen from "../screens/TrackeesScreen";
 
-const ChatTab = () => {
-  const { user } = useAuthSession();
-  if (!user) return null;
-  return <ContactsScreen user={user} />;
-};
-
-export default ChatTab;
+// The landing screen. Tracking is the thing this app now asks you to be
+// deliberate about — who can see you, who is asking, and who has looked — so it
+// is what opens, rather than something you have to go and find.
+export default TrackeesScreen;

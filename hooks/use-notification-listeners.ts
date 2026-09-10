@@ -35,7 +35,7 @@ export function useNotificationListeners() {
         // "Someone checked your location" opens the Track tab, where the
         // trackee can see who is watching and stop it.
         if (data?.type === "watch-started") {
-          router.push("/(tabs)/track");
+          router.push("/(tabs)");
           return;
         }
 
