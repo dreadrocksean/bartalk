@@ -312,6 +312,114 @@ await check("a revoked tracker loses access even mid-watch", () =>
   assertFails(getDoc(docRef(parentDb, "locations", TEEN))),
 );
 
+console.log("\nGuardianship");
+
+const CHILD = "child-uid";
+const DEP_ID = `${PARENT}__${CHILD}`;
+const RELEASE_DELAY_MS = 172800000;
+const childDb = testEnv.authenticatedContext(CHILD).firestore();
+
+await check("a client cannot create a dependant link", () =>
+  assertFails(
+    setDoc(docRef(parentDb, "trackingLinks", DEP_ID), {
+      trackerId: PARENT,
+      trackeeId: CHILD,
+      members: [PARENT, CHILD],
+      trackerName: "Parent",
+      trackeeName: "Child",
+      status: "pending",
+      pausedByTrackee: false,
+      kind: "dependant",
+    }),
+  ),
+);
+
+// Only a Cloud Function may mint one, after a pairing code is redeemed on the
+// dependant's own device. Stand in for that here.
+await testEnv.withSecurityRulesDisabled(async (context) => {
+  await setDoc(docRef(context.firestore(), "trackingLinks", DEP_ID), {
+    trackerId: PARENT,
+    trackeeId: CHILD,
+    members: [PARENT, CHILD],
+    trackerName: "Parent",
+    trackeeName: "Child",
+    status: "active",
+    pausedByTrackee: false,
+    kind: "dependant",
+  });
+});
+
+await check("a dependant cannot pause being seen", () =>
+  assertFails(
+    updateDoc(docRef(childDb, "trackingLinks", DEP_ID), {
+      pausedByTrackee: true,
+    }),
+  ),
+);
+
+await check("a dependant cannot revoke", () =>
+  assertFails(
+    updateDoc(docRef(childDb, "trackingLinks", DEP_ID), { status: "revoked" }),
+  ),
+);
+
+await check("a dependant cannot decline", () =>
+  assertFails(
+    updateDoc(docRef(childDb, "trackingLinks", DEP_ID), { status: "declined" }),
+  ),
+);
+
+await check("a friendship cannot be promoted to guardianship", () =>
+  assertFails(
+    updateDoc(docRef(parentDb, "trackingLinks", LINK_ID), {
+      kind: "dependant",
+    }),
+  ),
+);
+
+await check("guardianship cannot be downgraded to hide it existed", () =>
+  assertFails(
+    updateDoc(docRef(parentDb, "trackingLinks", DEP_ID), { kind: "friend" }),
+  ),
+);
+
+await check("a dependant may always ask to be released", () => {
+  const requestedAt = Date.now();
+  return assertSucceeds(
+    updateDoc(docRef(childDb, "trackingLinks", DEP_ID), {
+      releaseRequestedAt: requestedAt,
+      releaseEffectiveAt: requestedAt + RELEASE_DELAY_MS,
+    }),
+  );
+});
+
+await check("...but cannot make the release immediate", () => {
+  const requestedAt = Date.now();
+  return assertFails(
+    updateDoc(docRef(childDb, "trackingLinks", DEP_ID), {
+      releaseRequestedAt: requestedAt,
+      releaseEffectiveAt: requestedAt + 1000,
+    }),
+  );
+});
+
+await check("...and cannot smuggle a revoke in alongside it", () => {
+  const requestedAt = Date.now();
+  return assertFails(
+    updateDoc(docRef(childDb, "trackingLinks", DEP_ID), {
+      releaseRequestedAt: requestedAt,
+      releaseEffectiveAt: requestedAt + RELEASE_DELAY_MS,
+      status: "revoked",
+    }),
+  );
+});
+
+await check("the guardian may end it whenever they like", () =>
+  assertSucceeds(
+    updateDoc(docRef(parentDb, "trackingLinks", DEP_ID), { status: "revoked" }),
+  ),
+);
+
 console.log("\nHistory");
 
 await testEnv.withSecurityRulesDisabled(async (context) => {

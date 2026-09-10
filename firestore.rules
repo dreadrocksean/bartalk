@@ -131,6 +131,12 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && (resource == null || uid() in resource.data.members);
 
+      // Links written before guardianship existed carry no kind at all, and a
+      // link with no kind is a friendship — the only thing links used to be.
+      function kindOf(data) {
+        return data.get('kind', 'friend');
+      }
+
       allow create: if isSignedIn()
         && request.resource.data.trackerId == uid()
         && request.resource.data.status == 'pending'
@@ -142,7 +148,13 @@ service cloud.firestore {
         && request.resource.data.members.hasOnly([
           request.resource.data.trackerId,
           request.resource.data.trackeeId
-        ]);
+        ])
+        // A client may only ever create a friendship. Guardianship is created
+        // by a Cloud Function, after a pairing code has been redeemed on the
+        // dependant's own device — because a tracker who could simply declare
+        // someone a dependant could strip that person's controls at will, and
+        // "dependant" is exactly the label that would be abused.
+        && kindOf(request.resource.data) == 'friend';
 
       // Neither side may rewrite who the link is between.
       function participantsUnchanged() {
@@ -151,18 +163,69 @@ service cloud.firestore {
           && request.resource.data.members == resource.data.members;
       }
 
-      allow update: if isSignedIn() && participantsUnchanged() && (
-        // The trackee decides everything about being seen.
-        (uid() == resource.data.trackeeId
-          && request.resource.data.status in ['active', 'declined', 'revoked'])
-        // The tracker may only re-ask or withdraw their own request. They can
-        // never move a link to 'active' — that is the trackee's consent.
-        || (uid() == resource.data.trackerId
-          && request.resource.data.status in ['pending', 'revoked']
-          && request.resource.data.pausedByTrackee == resource.data.pausedByTrackee)
-      );
+      // What a link is cannot change. A friendship cannot be promoted into
+      // guardianship, and guardianship cannot be quietly downgraded to hide
+      // that it ever existed.
+      function kindUnchanged() {
+        return kindOf(request.resource.data) == kindOf(resource.data);
+      }
+
+      // A friend decides everything about being seen.
+      function friendUpdate() {
+        return (uid() == resource.data.trackeeId
+            && request.resource.data.status in ['active', 'declined', 'revoked'])
+          // The tracker may only re-ask or withdraw their own request. They can
+          // never move a link to 'active' — that is the trackee's consent.
+          || (uid() == resource.data.trackerId
+            && request.resource.data.status in ['pending', 'revoked']
+            && request.resource.data.pausedByTrackee == resource.data.pausedByTrackee);
+      }
+
+      // A dependant does not consent to each look and cannot pause one. What
+      // they keep is the exit, and the record: they may always ask to be
+      // released, and they always see every entry in their own history.
+      function dependantUpdate() {
+        return request.resource.data.pausedByTrackee == false && (
+          // The guardian may end it whenever they like.
+          (uid() == resource.data.trackerId
+            && request.resource.data.status in ['active', 'revoked'])
+          // The dependant may touch nothing except the request to be let go.
+          // releaseEffectiveAt is pinned to the delay rather than left to the
+          // client, or asking to leave and leaving would be the same act.
+          || (uid() == resource.data.trackeeId
+            && request.resource.data.status == resource.data.status
+            && request.resource.data.diff(resource.data).affectedKeys()
+                 .hasOnly(['releaseRequestedAt', 'releaseEffectiveAt', 'updatedAt'])
+            // Read through get() with a default: reaching for a field that
+            // isn't in the write throws, and a rule that throws denies whatever
+            // else it was in the middle of deciding.
+            && isPlausibleTimestamp(
+                 request.resource.data.get('releaseRequestedAt', 0))
+            && request.resource.data.get('releaseEffectiveAt', 0) ==
+                 request.resource.data.get('releaseRequestedAt', 0) + 172800000)
+        );
+      }
+
+      allow update: if isSignedIn()
+        && participantsUnchanged()
+        && kindUnchanged()
+        && (
+          kindOf(resource.data) == 'dependant' ?
+            dependantUpdate() :
+            friendUpdate()
+        );
 
       allow delete: if false;
+    }
+
+    // ---------------- Pairing codes ----------------
+    // Guardianship is established by handing over the phone, which is what the
+    // whole industry uses as proof of authority. A code is minted for the
+    // guardian and redeemed on the dependant's device, both through Cloud
+    // Functions — so no client ever reads a code it was not given, and no
+    // client can spend one twice or after it expires.
+    match /pairingCodes/{code} {
+      allow read, write: if false;
     }
 
     // ---------------- Positions ----------------

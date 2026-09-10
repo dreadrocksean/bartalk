@@ -17,13 +17,17 @@ import {
   type FirebaseFirestoreTypes,
 } from "@react-native-firebase/firestore";
 
-import type {
-  LocationDoc,
-  LocationPermissionState,
-  LocationPublishMode,
-  TrackingEventDoc,
-  TrackingLinkDoc,
-  WatchSessionDoc,
+import { getApp } from "@react-native-firebase/app";
+import { getAuth } from "@react-native-firebase/auth";
+
+import {
+  DEPENDANT_RELEASE_DELAY_MS,
+  type LocationDoc,
+  type LocationPermissionState,
+  type LocationPublishMode,
+  type TrackingEventDoc,
+  type TrackingLinkDoc,
+  type WatchSessionDoc,
 } from "./app/types/tracking";
 import { getFirebaseDb } from "./firebase";
 import { buildTrackingLinkId, buildWatchSessionId } from "./tracking/constants";
@@ -466,3 +470,93 @@ export const fetchTrackingContacts = async (
       a.name.localeCompare(b.name),
     );
 };
+
+// ***************************//
+// ------Guardianship---------//
+// ***************************//
+
+/**
+ * Callables are reached over plain HTTPS rather than through
+ * @react-native-firebase/functions on purpose. That package is a native module,
+ * so adding it would move the build fingerprint — and this whole feature would
+ * then be stranded behind a new binary instead of shipping over the air. The
+ * callable protocol is a POST with an ID token and a `data` envelope, which
+ * fetch does perfectly well.
+ */
+const callFunction = async <T>(
+  name: string,
+  payload: Record<string, unknown> = {},
+): Promise<T> => {
+  const user = getAuth().currentUser;
+  if (!user) throw new Error("You need to be signed in.");
+
+  const projectId = getApp().options.projectId;
+  const token = await user.getIdToken();
+
+  const response = await fetch(
+    `https://us-central1-${projectId}.cloudfunctions.net/${name}`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ data: payload }),
+    },
+  );
+
+  const body = (await response.json()) as {
+    result?: T;
+    error?: { message?: string };
+  };
+  if (!response.ok || body.error) {
+    throw new Error(body.error?.message ?? "That didn't work. Try again.");
+  }
+  return body.result as T;
+};
+
+/**
+ * Step one, on the guardian's own device. The code is carried to the
+ * dependant's phone and typed there — possession is the proof of authority,
+ * which is the same thing Family Sharing and Family Link settle on.
+ */
+export const createPairingCode = () =>
+  callFunction<{ code: string; expiresAt: number }>("createPairingCode");
+
+/**
+ * Step two, on the dependant's device, signed in as the dependant. Their auth
+ * on this call is the evidence the phone was actually handed over — it cannot
+ * be produced remotely, which is what stops anyone declaring a stranger their
+ * dependant.
+ */
+export const redeemPairingCode = (code: string) =>
+  callFunction<{ linkId: string; guardianName: string }>("redeemPairingCode", {
+    code,
+  });
+
+/**
+ * A dependant asking to be let go.
+ *
+ * This always works. Guardianship a person cannot leave is the shape this
+ * feature takes when it is turned against someone, so the exit is not the
+ * guardian's to grant — it is only theirs to notice, and to talk about, in the
+ * time the delay buys. The effective time is pinned here and checked again in
+ * firestore.rules: asking to leave and leaving must not be the same act.
+ */
+export const requestRelease = (linkId: string) => {
+  const requestedAt = Date.now();
+  return updateDoc(doc(getDb(), TRACKING_LINKS, linkId), {
+    releaseRequestedAt: requestedAt,
+    releaseEffectiveAt: requestedAt + DEPENDANT_RELEASE_DELAY_MS,
+    updatedAt: serverTimestamp(),
+  });
+};
+
+/** Everyone who may see this user without being able to be switched off. */
+export const guardiansOf = (links: TrackingLinkDoc[], userId: string) =>
+  links.filter(
+    (link) =>
+      link.trackeeId === userId &&
+      link.kind === "dependant" &&
+      link.status === "active",
+  );

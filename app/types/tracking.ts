@@ -9,6 +9,40 @@ import type { FirebaseFirestoreTypes } from "@react-native-firebase/firestore";
  */
 export type TrackingLinkStatus = "pending" | "active" | "declined" | "revoked";
 
+/**
+ * What kind of relationship a link describes, and therefore who controls it.
+ *
+ * A friend decides everything about being seen: they accept, they pause, they
+ * revoke. A dependant does not — a child cannot switch off their parent.
+ *
+ * This lives on the link and not on the user because "dependant" is not a fact
+ * about a person, it is a fact about one relationship. The same teenager is
+ * supervised by a parent and an equal to their friends, and may be a tracker of
+ * a younger sibling; a role stamped on their user document would make a claim
+ * that is only true inside one edge of the graph.
+ *
+ * Crucially, a client may only ever create a "friend" link — see
+ * firestore.rules. Guardianship is created by a Cloud Function after a pairing
+ * code is redeemed on the dependant's own device, because a tracker who could
+ * declare someone a dependant could strip that person's controls at will.
+ */
+export type TrackingLinkKind = "friend" | "dependant";
+
+/**
+ * How long after a dependant asks to be released it happens on its own.
+ *
+ * A dependant who cannot leave at all is how this feature gets turned against
+ * someone: "dependant" is exactly the label a controlling partner reaches for,
+ * and guardian-only removal hands them the lock. So the exit always works, and
+ * it always tells the guardian — a parent re-establishes the link in seconds,
+ * while someone who needs out gets out.
+ *
+ * The delay is a genuine trade-off, not a solved problem. Shorter, and a child
+ * escapes supervision before a parent can respond. Longer, and a person in a
+ * bad situation waits with their guardian knowing they asked.
+ */
+export const DEPENDANT_RELEASE_DELAY_MS = 172_800_000; // 48 hours
+
 export type TrackingLinkDoc = {
   id: string;
   trackerId: string;
@@ -18,7 +52,14 @@ export type TrackingLinkDoc = {
   trackerName: string;
   trackeeName: string;
   status: TrackingLinkStatus;
+  /** Absent on links created before guardianship existed; treat as "friend". */
+  kind?: TrackingLinkKind;
   pausedByTrackee: boolean;
+  /** Dependant links only: when the dependant asked to be let go. */
+  releaseRequestedAt?: number;
+  /** Dependant links only: when that request completes on its own. */
+  releaseEffectiveAt?: number;
+  establishedAt?: FirebaseFirestoreTypes.Timestamp;
   createdAt?: FirebaseFirestoreTypes.Timestamp;
   respondedAt?: FirebaseFirestoreTypes.Timestamp;
   updatedAt?: FirebaseFirestoreTypes.Timestamp;

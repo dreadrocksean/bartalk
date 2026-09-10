@@ -55,6 +55,34 @@
           "order": "ASCENDING"
         }
       ]
+    },
+    {
+      "collectionGroup": "trackingLinks",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "releaseEffectiveAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "pairingCodes",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "guardianId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "usedAt",
+          "order": "ASCENDING"
+        }
+      ]
     }
   ],
   "fieldOverrides": []

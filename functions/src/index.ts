@@ -9,6 +9,11 @@ import {admin, db} from "./admin";
 import {getUserPushTarget, sendExpoPush} from "./push";
 
 export {
+  completeDependantReleases,
+  createPairingCode,
+  redeemPairingCode,
+} from "./guardianship";
+export {
   onTrackingLinkWrite,
   onWatchSessionWrite,
   reapStaleWatchSessions,

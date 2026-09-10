@@ -303,6 +303,42 @@ export const onTrackingLinkWrite = runWith({maxInstances: 10})
         return null;
       }
 
+      // A dependant asking to be let go is the one message a guardian must not
+      // miss, and it is deliberately impossible to suppress from the app.
+      const before = change.before.exists ? change.before.data() : null;
+      const askedNow =
+        typeof after.releaseRequestedAt === "number" &&
+        before?.releaseRequestedAt !== after.releaseRequestedAt;
+      if (askedNow) {
+        const effectiveAt =
+          typeof after.releaseEffectiveAt === "number" ?
+            after.releaseEffectiveAt :
+            after.releaseRequestedAt + 172_800_000;
+        const hours = Math.max(
+          1,
+          Math.round((effectiveAt - Date.now()) / 3_600_000),
+        );
+        const target = await getUserPushTarget(after.trackerId);
+        if (target) {
+          await sendExpoPush(
+            {
+              to: target.token,
+              title: `${after.trackeeName ?? "Someone"} asked to stop sharing`,
+              body: `This takes effect in about ${hours} hours unless you ` +
+                "end it sooner. Talk to them.",
+              sound: "default",
+              channelId: "messages",
+              priority: "high",
+              data: {
+                type: "release-requested",
+                linkId: context.params.linkId as string,
+              },
+            },
+            {linkId: context.params.linkId, kind: "release-requested"},
+          );
+        }
+      }
+
       const stillSharing =
         after.status === "active" && after.pausedByTrackee !== true;
       if (stillSharing) {
