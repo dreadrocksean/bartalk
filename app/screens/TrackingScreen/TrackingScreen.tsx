@@ -11,7 +11,7 @@ import { useMyPosition } from "../../../hooks/use-my-position";
 import { useTrackeeLocations } from "../../../hooks/use-trackee-locations";
 import { useWatchCountdown } from "../../../hooks/use-watch-countdown";
 import { useWatchScope } from "../../../hooks/use-watch-scope";
-import { formatAge } from "../../../tracking/format";
+import { describeMissingPosition, formatAge } from "../../../tracking/format";
 import { useTracking, type WatchTarget } from "../../../tracking/tracking-provider";
 import type { LatLng } from "../../types/tracking";
 import { AutoFitChip } from "./components/AutoFitChip";
@@ -19,6 +19,7 @@ import {
   OtherTrackeesMenu,
   type TrackeeOption,
 } from "./components/OtherTrackeesMenu";
+import { NoPositionNotice } from "./components/NoPositionNotice";
 import { TrackeeMarker } from "./components/TrackeeMarker";
 import { WatchEndedCard } from "./components/WatchEndedCard";
 import { WatchExpiryChip } from "./components/WatchExpiryChip";
@@ -82,6 +83,22 @@ const TrackingScreen = () => {
     useAutoFitMap(coordinates);
   const { secondsRemaining: watchSecondsRemaining, isEnding } =
     useWatchCountdown(activeWatches);
+
+  // Someone can be watched and still have no pin — their first fix may not have
+  // arrived, or their location may be switched off entirely. The link already
+  // knows which, so say so rather than leaving an empty map to be read as a bug.
+  const missingReasons = useMemo(
+    () =>
+      activeWatches
+        .filter((watch) => !locations[watch.trackeeId])
+        .map((watch) =>
+          describeMissingPosition(
+            watch.trackeeName,
+            trackees.find((link) => link.trackeeId === watch.trackeeId),
+          ),
+        ),
+    [activeWatches, locations, trackees],
+  );
 
   useEffect(() => {
     navigation.setOptions({ title: "Track", headerBackTitle: "Trackees" });
@@ -167,6 +184,8 @@ const TrackingScreen = () => {
         {isEnding ? (
           <WatchExpiryChip secondsRemaining={watchSecondsRemaining} />
         ) : null}
+
+        <NoPositionNotice reasons={missingReasons} />
 
         <WatchEndedCard expired={expiredWatches} onResume={resumeWatch} />
 

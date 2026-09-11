@@ -259,6 +259,24 @@ export const setLocationAudience = ({
  */
 const LOCATION_RETRY_DELAYS_MS = [400, 900, 1800, 3000];
 
+/**
+ * A position document can exist with no position in it.
+ *
+ * setLocationAudience creates or merges the document the moment a link is
+ * accepted, writing only who may read it — so between accepting and the first
+ * fix there is a document with no lat or lng at all, and if the trackee's
+ * location is switched off there never will be. Callers reasonably test
+ * `if (location)`, which is true for that shell, and then read coordinates that
+ * are undefined. Treating it as no location at all is the only answer that is
+ * true everywhere: there is genuinely nowhere to draw.
+ */
+const hasCoordinates = (location: LocationDoc | null): boolean =>
+  !!location &&
+  typeof location.lat === "number" &&
+  Number.isFinite(location.lat) &&
+  typeof location.lng === "number" &&
+  Number.isFinite(location.lng);
+
 export const listenForLocation = (
   trackeeId: string,
   callback: (location: LocationDoc | null) => void,
@@ -273,9 +291,10 @@ export const listenForLocation = (
       doc(getDb(), LOCATIONS, trackeeId),
       (snapshot) => {
         attempt = 0;
-        callback(
-          snapshot?.exists() ? withId<LocationDoc>(snapshot) : null,
-        );
+        const location = snapshot?.exists() ?
+          withId<LocationDoc>(snapshot) :
+          null;
+        callback(hasCoordinates(location) ? location : null);
       },
       () => {
         unsubscribe?.();

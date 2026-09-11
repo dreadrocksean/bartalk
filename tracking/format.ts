@@ -88,3 +88,34 @@ export const describeSharing = (link: {
     isWarning: false,
   };
 };
+
+/**
+ * Why there is no pin for someone, in the words a person would use.
+ *
+ * "No location yet" is true and useless — it leaves the tracker unable to tell
+ * a phone that has not reported in yet from one whose location has been
+ * switched off, which are completely different situations and call for
+ * completely different responses.
+ */
+export const describeMissingPosition = (
+  name: string,
+  link?: {
+    trackeeLastPublishedAt?: number;
+    trackeePermissionState?: string;
+  },
+): string => {
+  if (link?.trackeePermissionState === "denied") {
+    return `${name}'s location is switched off on their phone.`;
+  }
+
+  const publishedAt = link?.trackeeLastPublishedAt;
+  if (typeof publishedAt !== "number" || publishedAt === 0) {
+    return `Waiting for ${name}'s first position. Their phone sends one as soon as it can.`;
+  }
+
+  if (Date.now() - publishedAt > SHARING_STALE_MS) {
+    return `Nothing from ${name} for ${formatAge(publishedAt)}. Their phone may be off or without signal.`;
+  }
+
+  return `Waiting for ${name}'s position.`;
+};

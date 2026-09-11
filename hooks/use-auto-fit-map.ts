@@ -5,7 +5,7 @@
 // user has been still for AUTO_FIT_RESUME_DELAY_MS, and the countdown is
 // surfaced in the UI so the camera never moves unannounced.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type MapView from "react-native-maps";
 
 import type { LatLng } from "../app/types/tracking";
@@ -19,7 +19,22 @@ import {
 const FIT_ANIMATION_MS = 600;
 const COUNTDOWN_TICK_MS = 250;
 
-export const useAutoFitMap = (coordinates: LatLng[]) => {
+/**
+ * One unusable point used to take the whole screen down: a position document
+ * with no lat crashed the render on `latitude.toFixed(5)` before any of this
+ * ran. That is fixed at the source, but the camera should not be the thing that
+ * fails if a bad point ever reaches it again.
+ */
+const isDrawable = (coordinate: LatLng): boolean =>
+  Number.isFinite(coordinate?.latitude) &&
+  Number.isFinite(coordinate?.longitude);
+
+export const useAutoFitMap = (input: LatLng[]) => {
+  const coordinates = useMemo<LatLng[]>(
+    () => input.filter(isDrawable),
+    [input],
+  );
+
   const mapRef = useRef<MapView | null>(null);
   const [isManual, setIsManual] = useState(false);
   const [secondsRemaining, setSecondsRemaining] = useState(0);

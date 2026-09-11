@@ -73,6 +73,28 @@ export default StyleSheet.create({
   // -------- The ceiling on a look --------
   dropdownRowDisabled: { opacity: 0.45 },
 
+  missingCard: {
+    alignSelf: "stretch",
+    backgroundColor: "#FFF1DB",
+    borderRadius: unity * 12,
+    borderWidth: unity * 1,
+    borderColor: "#E8C48B",
+    paddingVertical: unity * 11,
+    paddingHorizontal: unity * 13,
+    gap: unity * 9,
+  },
+  missingRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    gap: unity * 9,
+  },
+  missingText: {
+    flex: 1,
+    fontSize: unity * 13,
+    lineHeight: unity * 18,
+    color: "#5A3B0A",
+  },
+
   expiryChip: {
     flexDirection: "row",
     alignItems: "center",
