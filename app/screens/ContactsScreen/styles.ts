@@ -51,6 +51,26 @@ export default StyleSheet.create({
   lastMessage: { color: Colors.light.icon, fontSize: unity * 15 },
   chevron: { marginLeft: unity * 8 },
 
+  menuFooterDivider: {
+    height: unity * 1,
+    backgroundColor: Colors.light.border,
+    marginHorizontal: unity * 12,
+  },
+  menuFooter: {
+    paddingHorizontal: unity * 16,
+    paddingVertical: unity * 12,
+    gap: unity * 3,
+  },
+  menuFooterText: {
+    fontSize: unity * 12,
+    fontWeight: "600",
+    color: Colors.light.text,
+  },
+  menuFooterSubtext: {
+    fontSize: unity * 11,
+    color: Colors.light.icon,
+  },
+
   // Time above, count below, right-aligned as one column — the arrangement a
   // chat list is read in: when, then how much is waiting.
   meta: {

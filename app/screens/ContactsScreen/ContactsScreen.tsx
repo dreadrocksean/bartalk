@@ -22,6 +22,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useUnreadCounts } from "../../../hooks/use-unread-counts";
+import { buildLabel, updateLabel } from "../../utils/build-info";
 import { useWatchScope } from "../../../hooks/use-watch-scope";
 import { ThemedText } from "../../../components/themed-text";
 import { IconSymbol } from "../../../components/ui/icon-symbol";
@@ -376,12 +377,25 @@ const ContactsScreen: FC<ContactsScreenProps> = ({ user }) => {
               shadowColor: "#000",
               shadowOpacity: 0.1,
               shadowRadius: 8,
-              minWidth: 120,
+              // Wide enough for the build line beneath Logout; it was sized for
+              // a single word before.
+              minWidth: 220,
             }}
           >
             <Pressable onPress={handleLogout} style={{ padding: 16 }}>
               <Text style={{ color: "#d00", fontWeight: "bold" }}>Logout</Text>
             </Pressable>
+            <View style={styles.menuFooterDivider} />
+            <View style={styles.menuFooter}>
+              {/* Selectable because the reason anyone reads this is to tell
+                  someone else what they are running. */}
+              <Text style={styles.menuFooterText} selectable>
+                {buildLabel()}
+              </Text>
+              <Text style={styles.menuFooterSubtext} selectable>
+                {updateLabel()}
+              </Text>
+            </View>
           </View>
         </Pressable>
       </Modal>
