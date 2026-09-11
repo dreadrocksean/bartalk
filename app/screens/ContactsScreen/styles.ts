@@ -63,11 +63,6 @@ export default StyleSheet.create({
   },
   menuFooterText: {
     fontSize: unity * 12,
-    fontWeight: "600",
-    color: Colors.light.text,
-  },
-  menuFooterSubtext: {
-    fontSize: unity * 11,
     color: Colors.light.icon,
   },
 
