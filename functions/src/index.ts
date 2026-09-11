@@ -13,6 +13,7 @@ export {
   createPairingCode,
   redeemPairingCode,
 } from "./guardianship";
+export {onLocationWrite} from "./sharing-health";
 export {
   onTrackingLinkWrite,
   onWatchSessionWrite,

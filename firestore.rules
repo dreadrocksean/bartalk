@@ -206,9 +206,19 @@ service cloud.firestore {
         );
       }
 
+      // Sharing health is mirrored by the server from the position document. If
+      // a client could write it, a trackee could report themselves as sharing
+      // while publishing nothing — which is exactly the evasion it exists to
+      // surface — and a tracker could forge a gap that never happened.
+      function noServerHealthFields() {
+        return !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['trackeeLastPublishedAt', 'trackeePermissionState']);
+      }
+
       allow update: if isSignedIn()
         && participantsUnchanged()
         && kindUnchanged()
+        && noServerHealthFields()
         && (
           kindOf(resource.data) == 'dependant' ?
             dependantUpdate() :

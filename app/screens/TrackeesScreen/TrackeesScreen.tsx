@@ -15,7 +15,11 @@ import {
   setTrackingLinkPaused,
   type TrackingContact,
 } from "../../../tracking-api";
-import { formatAge, formatDuration } from "../../../tracking/format";
+import {
+  describeSharing,
+  formatAge,
+  formatDuration,
+} from "../../../tracking/format";
 import { requestTrackingPermissions } from "../../../tracking/permissions";
 import { useTracking } from "../../../tracking/tracking-provider";
 import type { TrackingLinkDoc } from "../../types/tracking";
@@ -205,21 +209,14 @@ const TrackeesScreen = () => {
                 {index > 0 ? <View style={styles.rowDivider} /> : null}
                 <PersonRow
                   name={link.trackeeName}
-                  status={
-                    isDependantLink(link)
-                      // Not "always sharing": this row cannot see whether they
-                      // are actually publishing — the rules deliberately keep a
-                      // position unreadable without an open watch session — and
-                      // a dependant who denies location permission in Settings
-                      // stops sharing while this row would still say they were.
-                      // State the arrangement, which is true, not the status,
-                      // which isn't known here.
-                      ? "Your dependant — can't pause or stop"
-                      : link.pausedByTrackee
-                        ? "Paused sharing"
-                        : "Sharing with you"
-                  }
-                  isWarning={link.pausedByTrackee && !isDependantLink(link)}
+                  // The row now reports whether they are actually publishing,
+                  // mirrored onto the link by the server. It still cannot see
+                  // where they are — that stays behind an open watch session —
+                  // which is the distinction that makes this safe to show: that
+                  // someone stopped sharing is the tracker's business, where
+                  // they were is not.
+                  status={describeSharing(link).text}
+                  isWarning={describeSharing(link).isWarning}
                 >
                   <View style={styles.rowButtons}>
                     <RowButton

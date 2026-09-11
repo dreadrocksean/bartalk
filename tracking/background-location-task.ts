@@ -123,7 +123,15 @@ export const startBackgroundLocationUpdates = async (live: boolean) => {
 };
 
 export const stopBackgroundLocationUpdates = async () => {
-  if (await isBackgroundLocationRunning()) {
-    await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+  try {
+    if (await isBackgroundLocationRunning()) {
+      await Location.stopLocationUpdatesAsync(BACKGROUND_LOCATION_TASK);
+    }
+  } catch {
+    // hasStartedLocationUpdatesAsync can say yes while the task is not
+    // registered in this JS context — after a reinstall, or a dev reload — and
+    // stopping it then throws "Task not found" as an unhandled rejection.
+    // Every caller wants the same end state either way: not running. That is
+    // already true here, so there is nothing to report and nothing to retry.
   }
 };

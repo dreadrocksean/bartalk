@@ -66,6 +66,13 @@ export type TrackingLinkDoc = {
   /** Dependant links only: when that request completes on its own. */
   releaseEffectiveAt?: number;
   establishedAt?: FirebaseFirestoreTypes.Timestamp;
+  /**
+   * Whether the trackee's device is still actually sharing. Written only by the
+   * server, mirrored from their position document — a tracker may learn *that*
+   * someone stopped sharing without being able to see *where* they were.
+   */
+  trackeeLastPublishedAt?: number;
+  trackeePermissionState?: LocationPermissionState | "unknown";
   createdAt?: FirebaseFirestoreTypes.Timestamp;
   respondedAt?: FirebaseFirestoreTypes.Timestamp;
   updatedAt?: FirebaseFirestoreTypes.Timestamp;

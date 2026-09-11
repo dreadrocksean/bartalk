@@ -52,6 +52,15 @@ export const LIVE_LOCATION_DISTANCE_M = 10;
 /** Don't write the same position to Firestore more often than this. */
 export const LOCATION_WRITE_THROTTLE_MS = 4_000;
 
+/**
+ * How long a trackee can go without publishing before their link says so.
+ *
+ * Generous on purpose: a phone in a pocket with no signal is not evasion, and
+ * crying wolf about ordinary life would make the signal worthless exactly when
+ * it matters. Half an hour of silence is unusual enough to be worth surfacing.
+ */
+export const SHARING_STALE_MS = 1_800_000;
+
 /** Past this age a pin is drawn as stale rather than pretending to be current. */
 export const LOCATION_STALE_MS = 180_000;
 

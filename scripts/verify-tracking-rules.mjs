@@ -312,6 +312,30 @@ await check("a revoked tracker loses access even mid-watch", () =>
   assertFails(getDoc(docRef(parentDb, "locations", TEEN))),
 );
 
+console.log("\nSharing health");
+
+// Mirrored by the server from the position document. A tracker must be able to
+// learn *that* someone stopped sharing without seeing *where* they were, and
+// neither side may write it: a trackee could otherwise claim to be sharing
+// while publishing nothing, and a tracker could invent a gap.
+await check("a trackee cannot forge their own sharing health", () =>
+  assertFails(
+    updateDoc(docRef(teenDb, "trackingLinks", LINK_ID), {
+      trackeeLastPublishedAt: Date.now(),
+      trackeePermissionState: "always",
+    }),
+  ),
+);
+
+await check("a tracker cannot forge the trackee's sharing health", () =>
+  assertFails(
+    updateDoc(docRef(parentDb, "trackingLinks", LINK_ID), {
+      trackeeLastPublishedAt: 0,
+      trackeePermissionState: "denied",
+    }),
+  ),
+);
+
 console.log("\nGuardianship");
 
 const CHILD = "child-uid";

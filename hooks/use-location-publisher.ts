@@ -46,6 +46,7 @@ export const useLocationPublisher = () => {
 
   const foregroundWatchRef = useRef<Location.LocationSubscription | null>(null);
   const lastAudienceKeyRef = useRef<string | null>(null);
+  const lastPermissionRef = useRef<string | null>(null);
 
   const stopForegroundWatch = useCallback(() => {
     foregroundWatchRef.current?.remove();
@@ -66,6 +67,7 @@ export const useLocationPublisher = () => {
         // Close off read access straight away rather than at the next fix.
         if (lastAudienceKeyRef.current !== null) {
           lastAudienceKeyRef.current = null;
+          lastPermissionRef.current = null;
           await setLocationAudience({ userId, sharedWith: [] }).catch(() => {});
         }
         return;
@@ -81,8 +83,17 @@ export const useLocationPublisher = () => {
         mode: isLive ? "live" : "idle",
       });
 
-      if (lastAudienceKeyRef.current !== audienceKey) {
+      // Permission is checked here as well as the audience. Someone who
+      // revokes location access in Settings changes nothing about who they are
+      // linked to, so keying this on the audience alone meant the most
+      // important fact about this device — that it has stopped being able to
+      // share — was never written anywhere the other side could see it.
+      if (
+        lastAudienceKeyRef.current !== audienceKey ||
+        lastPermissionRef.current !== permissionState
+      ) {
         lastAudienceKeyRef.current = audienceKey;
+        lastPermissionRef.current = permissionState;
         await setLocationAudience({
           userId,
           sharedWith: audience,
