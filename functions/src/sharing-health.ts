@@ -50,6 +50,18 @@ export const onLocationWrite = runWith({maxInstances: 10})
       }
 
       const userId = context.params.userId as string;
+
+      // A position document exists from the moment a link is accepted, holding
+      // only who may read it. Without coordinates there has been no publish,
+      // and stamping "last published: now" onto that would report healthy
+      // sharing for a device that has never shared anything — the precise lie
+      // this mechanism exists to prevent. Permission still gets through,
+      // because "their location is off" is the useful half.
+      const hasPosition =
+        typeof after.lat === "number" &&
+        Number.isFinite(after.lat) &&
+        typeof after.lng === "number" &&
+        Number.isFinite(after.lng);
       const publishedAt =
         typeof after.capturedAt === "number" ? after.capturedAt : Date.now();
       const permissionState =
@@ -83,15 +95,23 @@ export const onLocationWrite = runWith({maxInstances: 10})
         // reports, and a minute of saying otherwise is a minute of
         // saying something untrue.
         const permissionChanged = storedPermission !== permissionState;
+        if (!hasPosition && !permissionChanged) {
+          return;
+        }
         if (!permissionChanged &&
             publishedAt - storedAt < HEALTH_WRITE_THROTTLE_MS) {
           return;
         }
 
-        batch.update(doc.ref, {
-          trackeeLastPublishedAt: publishedAt,
-          trackeePermissionState: permissionState,
-        });
+        batch.update(
+          doc.ref,
+          hasPosition ?
+            {
+              trackeeLastPublishedAt: publishedAt,
+              trackeePermissionState: permissionState,
+            } :
+            {trackeePermissionState: permissionState},
+        );
         writes += 1;
       });
 

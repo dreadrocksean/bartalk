@@ -114,6 +114,35 @@ export const useLocationPublisher = () => {
         await startBackgroundLocationUpdates(isLive).catch(() => {});
       }
 
+      // "While Using" cannot run the background task, and the foreground watch
+      // below only runs while someone is actively watching — so without this a
+      // trackee who granted While Using published nothing, ever, and read as
+      // having never shared at all. The OS does allow a fix while the app is
+      // open, so take one: a position from the last time they opened BarTalk is
+      // worth incomparably more than silence.
+      if (permissionState === "whenInUse" && !isLive) {
+        await stopBackgroundLocationUpdates();
+        if (!isActive) return;
+        await Location.getCurrentPositionAsync({
+          accuracy: Location.Accuracy.Balanced,
+        })
+          .then((location) =>
+            publishLocation({
+              userId,
+              lat: location.coords.latitude,
+              lng: location.coords.longitude,
+              accuracy: location.coords.accuracy ?? null,
+              heading: location.coords.heading ?? null,
+              speed: location.coords.speed ?? null,
+              capturedAt: location.timestamp,
+              mode: "idle",
+              sharedWith: audience,
+              permissionState,
+            }),
+          )
+          .catch(() => {});
+      }
+
       // While someone is actively watching, publish from the foreground too, so
       // the pin moves at conversation speed rather than at battery-saver speed.
       if (isLive) {
