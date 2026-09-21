@@ -287,6 +287,19 @@ const stripMediaType = (media: MessageMedia): MessageImage => {
   return image;
 };
 
+/**
+ * Drops keys whose value is `undefined`.
+ *
+ * Firestore rejects `undefined` outright rather than skipping it, and an
+ * attachment legitimately has gaps: the picker returns no file name for many
+ * videos, and a pasted image has neither a name nor a size. Without this an
+ * ordinary send fails with "Unsupported field value: undefined".
+ */
+const withoutUndefined = <T extends object>(value: T): T =>
+  Object.fromEntries(
+    Object.entries(value).filter(([, entry]) => entry !== undefined),
+  ) as T;
+
 const buildMessagePayload = (
   message: SendMessageInput,
 ): FirebaseFirestoreTypes.DocumentData => {
@@ -302,7 +315,7 @@ const buildMessagePayload = (
   }
   const media = message.media ?? [];
   if (media.length > 0) {
-    payload.media = media;
+    payload.media = media.map(withoutUndefined);
   }
   // Clients shipped before `media` existed read `image` and nothing else, so
   // mirror the first attachment there whenever it is one they can render.
@@ -310,7 +323,7 @@ const buildMessagePayload = (
     message.image ??
     (media[0]?.type === "image" ? stripMediaType(media[0]) : undefined);
   if (legacyImage) {
-    payload.image = legacyImage;
+    payload.image = withoutUndefined(legacyImage);
   }
   if (message.replyTo) {
     payload.replyTo = message.replyTo;

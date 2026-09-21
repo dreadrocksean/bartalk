@@ -680,16 +680,19 @@ const MessagingScreen = () => {
    * Adds to the tray rather than replacing it, so a second trip to the picker
    * tops up a selection instead of discarding the first one.
    */
-  const appendPendingMedia = useCallback((incoming: PendingMedia[]) => {
-    if (incoming.length === 0) return;
-    setPendingMedia((current) => {
-      const room = MEDIA_SELECTION_LIMIT - current.length;
+  const appendPendingMedia = useCallback(
+    (incoming: PendingMedia[]) => {
+      if (incoming.length === 0) return;
+
+      // Counted and warned about out here: a state updater has to stay pure,
+      // and an alert raised inside one can fire twice.
+      const room = MEDIA_SELECTION_LIMIT - pendingMedia.length;
       if (room <= 0) {
         Alert.alert(
           "Attachment limit reached",
           `A message can carry up to ${MEDIA_SELECTION_LIMIT} photos or videos.`,
         );
-        return current;
+        return;
       }
       if (incoming.length > room) {
         Alert.alert(
@@ -697,9 +700,10 @@ const MessagingScreen = () => {
           `Only the first ${room} of those were added. A message can carry up to ${MEDIA_SELECTION_LIMIT} photos or videos.`,
         );
       }
-      return [...current, ...incoming.slice(0, room)];
-    });
-  }, []);
+      setPendingMedia((current) => [...current, ...incoming.slice(0, room)]);
+    },
+    [pendingMedia.length],
+  );
 
   const pickMediaFromLibrary = useCallback(async () => {
     try {
