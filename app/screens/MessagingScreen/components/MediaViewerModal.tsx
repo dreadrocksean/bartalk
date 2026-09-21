@@ -8,6 +8,7 @@ import {
   View,
   useWindowDimensions,
 } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import type { MessageMedia } from "../../../types/firestore";
 import { saveMediaToDevice, shareMedia } from "../../../utils/media-download";
@@ -32,6 +33,7 @@ export const MediaViewerModal = ({
   const insets = useSafeAreaInsets();
   const [activeIndex, setActiveIndex] = useState(0);
   const [busyAction, setBusyAction] = useState<"save" | "share" | null>(null);
+  const [isZoomed, setIsZoomed] = useState(false);
 
   const items = viewerState?.items ?? [];
   const openedAtIndex = viewerState?.index ?? 0;
@@ -40,6 +42,7 @@ export const MediaViewerModal = ({
     if (!viewerState) return;
     setActiveIndex(openedAtIndex);
     setBusyAction(null);
+    setIsZoomed(false);
   }, [openedAtIndex, viewerState]);
 
   const handleMomentumScrollEnd = useCallback(
@@ -81,6 +84,7 @@ export const MediaViewerModal = ({
         height={height}
         isActive={index === activeIndex}
         onPressBackdrop={onClose}
+        onZoomChange={setIsZoomed}
       />
     ),
     [activeIndex, height, onClose, width],
@@ -93,7 +97,7 @@ export const MediaViewerModal = ({
       animationType="fade"
       onRequestClose={onClose}
     >
-      <View style={styles.mediaViewerBackdrop}>
+      <GestureHandlerRootView style={styles.mediaViewerBackdrop}>
         <FlatList
           // A fresh list per opening, so `initialScrollIndex` is honoured even
           // when the viewer is reopened before the last dismissal settles.
@@ -103,6 +107,7 @@ export const MediaViewerModal = ({
           keyExtractor={(item, index) => `${item.storagePath || item.url}-${index}`}
           horizontal
           pagingEnabled
+          scrollEnabled={!isZoomed}
           showsHorizontalScrollIndicator={false}
           initialScrollIndex={openedAtIndex}
           getItemLayout={(_, index) => ({
@@ -158,7 +163,7 @@ export const MediaViewerModal = ({
             <View style={styles.mediaViewerButtonSpacer} />
           )}
         </View>
-      </View>
+      </GestureHandlerRootView>
     </Modal>
   );
 };

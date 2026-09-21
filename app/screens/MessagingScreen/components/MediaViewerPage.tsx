@@ -1,9 +1,8 @@
 import { Image as ExpoImage } from "expo-image";
 import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect } from "react";
-import { Pressable, View } from "react-native";
 import type { MessageMedia } from "../../../types/firestore";
-import styles from "../styles";
+import { ZoomableMedia } from "./ZoomableMedia";
 
 type MediaViewerPageProps = {
   media: MessageMedia;
@@ -13,9 +12,35 @@ type MediaViewerPageProps = {
   isActive: boolean;
   /** Tapping a still dismisses the viewer; taps on a video work its controls. */
   onPressBackdrop: () => void;
+  onZoomChange: (isZoomed: boolean) => void;
 };
 
-const VideoPage = ({ media, width, height, isActive }: MediaViewerPageProps) => {
+/**
+ * The size the content actually occupies once letterboxed into the page, which
+ * is what the pan limits have to be measured against — not the page itself.
+ */
+const fitWithin = (
+  media: MessageMedia,
+  width: number,
+  height: number,
+) => {
+  const ratio =
+    media.width && media.height && media.height > 0
+      ? media.width / media.height
+      : width / height;
+  const boxRatio = width / height;
+  return ratio > boxRatio
+    ? { width, height: width / ratio }
+    : { width: height * ratio, height };
+};
+
+const VideoPage = ({
+  media,
+  width,
+  height,
+  isActive,
+  onZoomChange,
+}: MediaViewerPageProps) => {
   const player = useVideoPlayer({ uri: media.url }, (instance) => {
     instance.loop = false;
   });
@@ -25,8 +50,17 @@ const VideoPage = ({ media, width, height, isActive }: MediaViewerPageProps) => 
     if (!isActive) player.pause();
   }, [isActive, player]);
 
+  const fitted = fitWithin(media, width, height);
+
   return (
-    <View style={[styles.mediaViewerPage, { width, height }]}>
+    <ZoomableMedia
+      width={width}
+      height={height}
+      contentWidth={fitted.width}
+      contentHeight={fitted.height}
+      isActive={isActive}
+      onZoomChange={onZoomChange}
+    >
       <VideoView
         player={player}
         style={{ width, height }}
@@ -34,7 +68,7 @@ const VideoPage = ({ media, width, height, isActive }: MediaViewerPageProps) => 
         nativeControls
         allowsFullscreen
       />
-    </View>
+    </ZoomableMedia>
   );
 };
 
@@ -44,17 +78,24 @@ export const MediaViewerPage = (props: MediaViewerPageProps) => {
     return <VideoPage {...props} />;
   }
 
-  const { media, width, height, onPressBackdrop } = props;
+  const { media, width, height, isActive, onPressBackdrop, onZoomChange } = props;
+  const fitted = fitWithin(media, width, height);
+
   return (
-    <Pressable
-      style={[styles.mediaViewerPage, { width, height }]}
-      onPress={onPressBackdrop}
+    <ZoomableMedia
+      width={width}
+      height={height}
+      contentWidth={fitted.width}
+      contentHeight={fitted.height}
+      isActive={isActive}
+      onZoomChange={onZoomChange}
+      onTap={onPressBackdrop}
     >
       <ExpoImage
         source={{ uri: media.url }}
         style={{ width, height }}
         contentFit="contain"
       />
-    </Pressable>
+    </ZoomableMedia>
   );
 };
