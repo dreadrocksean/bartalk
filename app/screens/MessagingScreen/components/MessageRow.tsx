@@ -1,17 +1,18 @@
 // cspell:ignore ReanimatedSwipeable swipeable
-import { Image as ExpoImage } from "expo-image";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRef } from "react";
 import { Text, TextInput, TouchableOpacity, View } from "react-native";
 import ReanimatedSwipeable, {
   type SwipeableMethods,
 } from "react-native-gesture-handler/ReanimatedSwipeable";
-import type { MessageDoc } from "../../../types/firestore";
+import type { MessageDoc, MessageMedia } from "../../../types/firestore";
 import {
   MY_BUBBLE_GRADIENT_COLORS,
   SWIPE_ANIMATION_OPTIONS,
 } from "../constants";
 import styles from "../styles";
+import { getMessageMedia } from "../utils";
+import { MediaStack } from "./MediaStack";
 
 type MessageRowProps = {
   message: MessageDoc;
@@ -29,7 +30,7 @@ type MessageRowProps = {
   onJumpToOriginalMessage: (messageId: string) => void;
   onEditCancel: () => void;
   onEditSave: () => void;
-  onViewerImageUriChange: (uri: string | null) => void;
+  onOpenMediaViewer: (media: MessageMedia[], index: number) => void;
   formatMessageTime: (timestamp: number) => string;
 };
 
@@ -46,7 +47,7 @@ export const MessageRow = ({
   onJumpToOriginalMessage,
   onEditCancel,
   onEditSave,
-  onViewerImageUriChange,
+  onOpenMediaViewer,
   formatMessageTime: formatTime,
 }: MessageRowProps) => {
   const isMe = message.sender === currentUserId;
@@ -54,12 +55,8 @@ export const MessageRow = ({
   const replyTo = message.replyTo;
   const messageText = typeof message.text === "string" ? message.text : "";
   const hasText = messageText.trim().length > 0;
-  const messageImage = message.image;
-  const hasImage = Boolean(messageImage?.url);
-  const imageAspectRatio =
-    messageImage?.width && messageImage?.height && messageImage.height > 0
-      ? messageImage.width / messageImage.height
-      : 1;
+  const messageMedia = getMessageMedia(message);
+  const hasMedia = messageMedia.length > 0;
   const messageTime = formatTime(message.timestamp);
   const reactionCounts = new Map<string, number>();
   Object.values(message.reactions ?? {}).forEach((reactionEmoji) => {
@@ -252,18 +249,13 @@ export const MessageRow = ({
                   {messageText}
                 </Text>
               ) : null}
-              {hasImage ? (
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => onViewerImageUriChange(messageImage?.url ?? null)}
-                  style={hasText ? styles.messageImageWrapWithText : null}
-                >
-                  <ExpoImage
-                    source={{ uri: messageImage?.url }}
-                    style={[styles.messageImage, { aspectRatio: imageAspectRatio }]}
-                    contentFit="cover"
+              {hasMedia ? (
+                <View style={hasText ? styles.messageImageWrapWithText : null}>
+                  <MediaStack
+                    media={messageMedia}
+                    onPress={(index) => onOpenMediaViewer(messageMedia, index)}
                   />
-                </TouchableOpacity>
+                </View>
               ) : null}
               {message.edited && hasText ? (
                 <Text style={styles.edited}>(edited)</Text>

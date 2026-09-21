@@ -1,4 +1,4 @@
-import type { MessageDoc } from "../../types/firestore";
+import type { MessageDoc, MessageMedia } from "../../types/firestore";
 import { MONTH_LABELS, WEEKDAY_LABELS } from "./constants";
 import type { MessageListItem } from "./types";
 
@@ -77,4 +77,48 @@ export const buildMessageListItems = (messages: MessageDoc[]) => {
   });
 
   return items;
+};
+
+/**
+ * Every attachment on a message, whichever shape it was written in. Messages
+ * sent before multi-attachment support only have the single `image` field, so
+ * they are lifted into the same array the rest of the UI works with.
+ */
+export const getMessageMedia = (message: MessageDoc): MessageMedia[] => {
+  const media = Array.isArray(message.media) ? message.media : [];
+  const usable = media.filter((item) => Boolean(item?.url));
+  if (usable.length > 0) {
+    return usable.map((item) => ({
+      ...item,
+      type: item.type === "video" ? "video" : "image",
+    }));
+  }
+  if (message.image?.url) {
+    return [{ ...message.image, type: "image" }];
+  }
+  return [];
+};
+
+/** "0:07", "1:42", "12:05" — the shape a duration takes on a video tile. */
+export const formatMediaDuration = (durationMs?: number) => {
+  if (typeof durationMs !== "number" || !Number.isFinite(durationMs) || durationMs <= 0) {
+    return "";
+  }
+  const totalSeconds = Math.round(durationMs / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, "0")}`;
+};
+
+/** What a message reads as when it is quoted in a reply or a notification. */
+export const describeMessageMedia = (media: MessageMedia[]) => {
+  if (media.length === 0) return "";
+  if (media.length > 1) {
+    const allVideos = media.every((item) => item.type === "video");
+    const allImages = media.every((item) => item.type === "image");
+    if (allVideos) return `${media.length} videos`;
+    if (allImages) return `${media.length} photos`;
+    return `${media.length} attachments`;
+  }
+  return media[0].type === "video" ? "Video" : "Photo";
 };

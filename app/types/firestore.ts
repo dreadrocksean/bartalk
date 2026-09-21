@@ -15,7 +15,7 @@ export type UserDoc = {
   lastSignIn?: FirebaseFirestoreTypes.Timestamp;
 };
 
-export type MessageKind = "text" | "image" | "mixed";
+export type MessageKind = "text" | "image" | "video" | "album" | "mixed";
 
 export type MessageImage = {
   url: string;
@@ -27,6 +27,19 @@ export type MessageImage = {
   sizeBytes?: number;
 };
 
+export type MessageMediaType = "image" | "video";
+
+/**
+ * One attachment on a message. `MessageImage` is the older single-attachment
+ * shape; this is the same thing plus a kind and a duration, and it arrives in
+ * an array so a message can carry several.
+ */
+export type MessageMedia = MessageImage & {
+  type: MessageMediaType;
+  /** Videos only. Milliseconds, as reported by the picker. */
+  durationMs?: number;
+};
+
 export type MessageReactions = {
   [userId: string]: string;
 };
@@ -35,7 +48,14 @@ export type MessageDoc = {
   id: string;
   text?: string;
   kind?: MessageKind;
+  /**
+   * The first attachment, repeated here so that clients shipped before
+   * multi-attachment messages existed still render something. Only set when
+   * that first attachment is an image.
+   */
   image?: MessageImage;
+  /** Every attachment, in the order the sender picked them. */
+  media?: MessageMedia[];
   sender: string;
   receiverId: string;
   timestamp: number;
@@ -50,7 +70,7 @@ export type ReplyReference = {
   messageId: string;
   senderId: string;
   snippet: string;
-  type?: "text" | "image";
+  type?: "text" | "image" | "video";
   deleted?: boolean;
 };
 

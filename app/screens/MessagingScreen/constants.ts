@@ -14,6 +14,18 @@ export const SWIPE_ANIMATION_OPTIONS = {
   bounciness: 6,
 } as const;
 
+/** How many attachments one message may carry. */
+export const MEDIA_SELECTION_LIMIT = 10;
+
+/**
+ * The fanned stack shows the newest attachment face-on with two more peeking
+ * out behind it, so the shape reads as "several" before the count is read.
+ */
+export const MEDIA_STACK_VISIBLE_LAYERS = 3;
+export const MEDIA_STACK_LAYER_ROTATION_DEG = 4.5;
+export const MEDIA_STACK_LAYER_OFFSET_PX = 5;
+export const MEDIA_STACK_LAYER_SCALE_STEP = 0.045;
+
 const MY_BUBBLE_COLOR = Colors.light.bubbleMe;
 export const MY_BUBBLE_GRADIENT_COLORS = [
   smartShade(MY_BUBBLE_COLOR, -5),

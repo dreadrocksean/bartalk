@@ -20,6 +20,8 @@ import { Alert, Platform } from "react-native";
 import type {
   MessageImage,
   MessageKind,
+  MessageMedia,
+  MessageMediaType,
   ReplyReference,
 } from "./app/types/firestore";
 import { getFirebaseDb, getFirebaseStorage } from "./firebase";
@@ -256,6 +258,7 @@ export type SendMessageInput = {
   text?: string;
   kind?: MessageKind;
   image?: MessageImage;
+  media?: MessageMedia[];
   sender: string;
   timestamp: number;
   receiverId: string;
@@ -266,10 +269,22 @@ export type SendMessageInput = {
 
 const resolveMessageKind = (message: SendMessageInput): MessageKind => {
   const hasText = typeof message.text === "string" && message.text.trim().length > 0;
-  const hasImage = Boolean(message.image?.url);
-  if (hasText && hasImage) return "mixed";
-  if (hasImage) return "image";
-  return "text";
+  const media = message.media ?? [];
+  const firstMedia = media[0];
+  const hasMedia = media.length > 0 || Boolean(message.image?.url);
+  if (!hasMedia) return "text";
+  if (hasText) return "mixed";
+  if (media.length > 1) return "album";
+  if (firstMedia?.type === "video") return "video";
+  return "image";
+};
+
+/** `MessageMedia` minus the fields the legacy `image` shape never had. */
+const stripMediaType = (media: MessageMedia): MessageImage => {
+  const { type, durationMs, ...image } = media;
+  void type;
+  void durationMs;
+  return image;
 };
 
 const buildMessagePayload = (
@@ -285,8 +300,17 @@ const buildMessagePayload = (
   if (typeof message.text === "string") {
     payload.text = message.text;
   }
-  if (message.image) {
-    payload.image = message.image;
+  const media = message.media ?? [];
+  if (media.length > 0) {
+    payload.media = media;
+  }
+  // Clients shipped before `media` existed read `image` and nothing else, so
+  // mirror the first attachment there whenever it is one they can render.
+  const legacyImage =
+    message.image ??
+    (media[0]?.type === "image" ? stripMediaType(media[0]) : undefined);
+  if (legacyImage) {
+    payload.image = legacyImage;
   }
   if (message.replyTo) {
     payload.replyTo = message.replyTo;
@@ -324,15 +348,18 @@ export const sendMessage = async (
   }
 };
 
-type UploadConversationImageInput = {
+type UploadConversationMediaInput = {
   conversationId: string;
   senderId: string;
+  /** Defaults to "image", which is what every caller sent before video existed. */
+  mediaType?: MessageMediaType;
   localUri?: string;
   dataUri?: string;
   fileName?: string;
   mimeType?: string;
   width?: number;
   height?: number;
+  durationMs?: number;
   sizeBytes?: number;
 };
 
@@ -404,9 +431,15 @@ const MIME_TO_EXTENSION: Record<string, string> = {
   "image/webp": "webp",
   "image/heic": "heic",
   "image/heif": "heif",
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/x-m4v": "m4v",
+  "video/webm": "webm",
+  "video/3gpp": "3gp",
 };
 
-const resolveImageExtension = (
+const resolveMediaExtension = (
+  mediaType: MessageMediaType,
   fileName?: string,
   mimeType?: string,
   localUri?: string,
@@ -419,7 +452,7 @@ const resolveImageExtension = (
   if (extensionMatch?.[1]) {
     return extensionMatch[1].toLowerCase();
   }
-  return "jpg";
+  return mediaType === "video" ? "mp4" : "jpg";
 };
 
 const toBase64 = (dataUriOrBase64: string): string => {
@@ -431,37 +464,47 @@ const toBase64 = (dataUriOrBase64: string): string => {
   return dataUriOrBase64.slice(markerIndex + marker.length);
 };
 
-export const uploadConversationImage = async (
-  input: UploadConversationImageInput,
-): Promise<MessageImage> => {
+export const uploadConversationMedia = async (
+  input: UploadConversationMediaInput,
+): Promise<MessageMedia> => {
   const {
     conversationId,
     senderId,
+    mediaType = "image",
     localUri,
     dataUri,
     fileName,
     mimeType,
     width,
     height,
+    durationMs,
     sizeBytes,
   } = input;
 
   if (!localUri && !dataUri) {
-    throw new Error("Missing image source for upload");
+    throw new Error("Missing media source for upload");
   }
 
-  const extension = resolveImageExtension(fileName, mimeType, localUri);
+  const extension = resolveMediaExtension(
+    mediaType,
+    fileName,
+    mimeType,
+    localUri,
+  );
   const uniqueSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  // Everything still lands under `images/`: the Storage rules are written
+  // against that prefix, and renaming it would lock out uploads until they are
+  // redeployed.
   const storagePath =
     `conversations/${conversationId}/images/${senderId}/${uniqueSuffix}.${extension}`;
   const metadata = mimeType ? {contentType: mimeType} : undefined;
 
   const uploadToRef = async (
-    imageRef: ReturnType<ReturnType<typeof getStorage>["ref"]>,
+    mediaRef: ReturnType<ReturnType<typeof getStorage>["ref"]>,
   ) => {
     if (localUri) {
       try {
-        await imageRef.putFile(
+        await mediaRef.putFile(
           localUri,
           metadata,
         );
@@ -470,7 +513,7 @@ export const uploadConversationImage = async (
           throw error;
         }
         const base64 = toBase64(dataUri);
-        await imageRef.putString(
+        await mediaRef.putString(
           base64,
           "base64",
           metadata,
@@ -481,7 +524,7 @@ export const uploadConversationImage = async (
 
     if (dataUri) {
       const base64 = toBase64(dataUri);
-      await imageRef.putString(
+      await mediaRef.putString(
         base64,
         "base64",
         metadata,
@@ -489,9 +532,9 @@ export const uploadConversationImage = async (
     }
   };
 
-  let imageRef = getStorage().ref(storagePath);
+  let mediaRef = getStorage().ref(storagePath);
   try {
-    await uploadToRef(imageRef);
+    await uploadToRef(mediaRef);
   } catch (error) {
     const alternateBucketUrl = getAlternateBucketUrl();
     const canRetryWithAlternateBucket =
@@ -501,21 +544,34 @@ export const uploadConversationImage = async (
       throw error;
     }
 
-    imageRef = getStorage(alternateBucketUrl).ref(storagePath);
-    await uploadToRef(imageRef);
+    mediaRef = getStorage(alternateBucketUrl).ref(storagePath);
+    await uploadToRef(mediaRef);
   }
 
-  const url = await getDownloadURLWithRetry(imageRef);
-  return {
+  const url = await getDownloadURLWithRetry(mediaRef);
+  const uploaded: MessageMedia = {
     url,
     storagePath,
+    type: mediaType,
     width,
     height,
     mimeType,
     fileName,
     sizeBytes,
   };
+  if (mediaType === "video" && typeof durationMs === "number") {
+    uploaded.durationMs = durationMs;
+  }
+  return uploaded;
 };
+
+/** @deprecated Use {@link uploadConversationMedia}. */
+export const uploadConversationImage = async (
+  input: Omit<UploadConversationMediaInput, "mediaType" | "durationMs">,
+): Promise<MessageImage> =>
+  stripMediaType(
+    await uploadConversationMedia({ ...input, mediaType: "image" }),
+  );
 
 export const editMessage = (
   conversationId: string,

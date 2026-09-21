@@ -1,4 +1,9 @@
-import type { MessageDoc, ReplyReference } from "../../types/firestore";
+import type {
+  MessageDoc,
+  MessageMedia,
+  MessageMediaType,
+  ReplyReference,
+} from "../../types/firestore";
 
 export type ReplyTarget = Required<
   Pick<ReplyReference, "messageId" | "senderId" | "snippet">
@@ -6,16 +11,26 @@ export type ReplyTarget = Required<
   type: "text";
 };
 
-export type PendingImage = {
+export type PendingMedia = {
+  /** Stable key for lists and for removing one item from the tray. */
+  id: string;
   source: "picker" | "paste";
+  type: MessageMediaType;
   previewUri: string;
   localUri?: string;
   dataUri?: string;
   width?: number;
   height?: number;
+  durationMs?: number;
   fileName?: string;
   mimeType?: string;
   sizeBytes?: number;
+};
+
+/** What the full-screen viewer is showing, and where in the set it opened. */
+export type MediaViewerState = {
+  items: MessageMedia[];
+  index: number;
 };
 
 export type MessageActionSheetState = {

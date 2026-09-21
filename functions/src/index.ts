@@ -118,17 +118,41 @@ export const sendPushNotification = runWith({maxInstances: 10})
         return null;
       }
 
-      const hasImage = Boolean(message.image?.url);
+      // `media` is the current shape; `image` is what senders on older builds
+      // still write, so a message may carry either.
+      const media: {type?: string; url?: string}[] =
+        Array.isArray(message.media) ?
+          message.media.filter((item: {url?: string}) => Boolean(item?.url)) :
+          message.image?.url ?
+            [{type: "image", url: message.image.url}] :
+            [];
+      const hasMedia = media.length > 0;
+      const videoCount =
+        media.filter((item) => item.type === "video").length;
+      const mediaGlyph = hasMedia && videoCount === media.length ? "🎥" : "📷";
+      const mediaLabel =
+        media.length > 1 ?
+          videoCount === media.length ?
+            `${media.length} videos` :
+            videoCount === 0 ?
+              `${media.length} photos` :
+              `${media.length} attachments` :
+          videoCount === 1 ? "Video" : "Photo";
       const text =
         typeof message.text === "string" ? message.text.trim() : "";
       const resolvedKind =
         typeof message.kind === "string" ? message.kind :
-          hasImage && text.length > 0 ? "mixed" :
-            hasImage ? "image" :
-              "text";
-      const defaultBody = hasImage ? "📷 Photo" : "You have a new message";
+          hasMedia && text.length > 0 ? "mixed" :
+            media.length > 1 ? "album" :
+              videoCount === 1 ? "video" :
+                hasMedia ? "image" :
+                  "text";
+      const defaultBody =
+        hasMedia ? `${mediaGlyph} ${mediaLabel}` : "You have a new message";
       const rawBody =
-        text.length > 0 ? hasImage ? `📷 ${text}` : text : defaultBody;
+        text.length > 0 ?
+          hasMedia ? `${mediaGlyph} ${text}` : text :
+          defaultBody;
       const body =
         rawBody.length > 100 ? `${rawBody.slice(0, 97)}...` : rawBody;
       const replyToMessageId =
@@ -153,8 +177,10 @@ export const sendPushNotification = runWith({maxInstances: 10})
           channelId: ANDROID_NOTIFICATION_CHANNEL_ID,
           title: replyToMessageId ?
             "New reply" :
-            hasImage ?
-              "New photo" :
+            hasMedia ?
+              media.length > 1 ?
+                videoCount === media.length ? "New videos" : "New photos" :
+                videoCount === 1 ? "New video" : "New photo" :
               "New message",
           body,
           data: payloadData,

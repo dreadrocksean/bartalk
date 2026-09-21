@@ -36,24 +36,27 @@ import {
   sendMessage,
   setConversationTyping,
   setMessageReaction,
-  uploadConversationImage,
+  uploadConversationMedia,
 } from "../../../api";
 
 import {
   ConversationDoc,
   MessageDoc,
-  MessageImage,
+  MessageMedia,
 } from "../../types/firestore";
+import { saveAllMediaToDevice } from "../../utils/media-download";
 import type {
+  MediaViewerState,
   MessageActionSheetState,
   MessageListItem,
-  PendingImage,
+  PendingMedia,
   ReplyTarget,
   SwipeAutoCloseTimeoutsMap,
 } from "./types";
 
 import {
   AUTO_SCROLL_BOTTOM_THRESHOLD_PX,
+  MEDIA_SELECTION_LIMIT,
   LOAD_OLDER_THROTTLE_MS,
   LOAD_OLDER_TOP_THRESHOLD_PX,
   MESSAGE_HIGHLIGHT_MS,
@@ -63,7 +66,7 @@ import {
   TYPING_STALE_MS,
 } from "./constants";
 import { DayHeaderRow } from "./components/DayHeaderRow";
-import { ImageViewerModal } from "./components/ImageViewerModal";
+import { MediaViewerModal } from "./components/MediaViewerModal";
 import { MessageActionSheetModal } from "./components/MessageActionSheetModal";
 import { MessageComposer } from "./components/MessageComposer";
 import { MessageRow } from "./components/MessageRow";
@@ -71,7 +74,9 @@ import { MiniMapDock } from "./components/MiniMapDock";
 import styles from "./styles";
 import {
   buildMessageListItems,
+  describeMessageMedia,
   formatMessageTime,
+  getMessageMedia,
   mergeMessagesChronologically,
 } from "./utils";
 
@@ -157,9 +162,13 @@ const MessagingScreen = () => {
   const [receiverPushToken, setReceiverPushToken] = useState<string | null>(
     null,
   );
-  const [pendingImage, setPendingImage] = useState<PendingImage | null>(null);
-  const [isSendingImage, setIsSendingImage] = useState(false);
-  const [viewerImageUri, setViewerImageUri] = useState<string | null>(null);
+  const [pendingMedia, setPendingMedia] = useState<PendingMedia[]>([]);
+  const [isSendingMedia, setIsSendingMedia] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<{
+    current: number;
+    total: number;
+  } | null>(null);
+  const [mediaViewer, setMediaViewer] = useState<MediaViewerState | null>(null);
   const [messageActionSheet, setMessageActionSheet] =
     useState<MessageActionSheetState | null>(null);
 
@@ -361,8 +370,8 @@ const MessagingScreen = () => {
         const snippet =
           textValue.length > 0
             ? textValue.slice(0, 120)
-            : message.image?.url
-              ? "[image]"
+            : getMessageMedia(message).length > 0
+              ? "[media]"
               : "[no-text]";
 
         topVisibleMessageDebugRef.current = {
@@ -586,9 +595,10 @@ const MessagingScreen = () => {
         setIsOtherPartyTyping(false);
         setReplyingTo(null);
         setHighlightedMessageId(null);
-        setPendingImage(null);
-        setViewerImageUri(null);
-        setIsSendingImage(false);
+        setPendingMedia([]);
+        setMediaViewer(null);
+        setIsSendingMedia(false);
+        setUploadProgress(null);
         setMessageActionSheet(null);
         setConversationId(null);
         setRecentMessages([]);
@@ -648,51 +658,95 @@ const MessagingScreen = () => {
       if (text.trim().length > 0) {
         return makeReplySnippet(text);
       }
-      if (message.image?.url) {
-        return "Photo";
+      const media = getMessageMedia(message);
+      if (media.length > 0) {
+        return describeMessageMedia(media);
       }
       return "Message";
     },
     [makeReplySnippet],
   );
 
-  const pickImageFromLibrary = useCallback(async () => {
+  const makePendingMediaId = useCallback(
+    () => `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`,
+    [],
+  );
+
+  /**
+   * Adds to the tray rather than replacing it, so a second trip to the picker
+   * tops up a selection instead of discarding the first one.
+   */
+  const appendPendingMedia = useCallback((incoming: PendingMedia[]) => {
+    if (incoming.length === 0) return;
+    setPendingMedia((current) => {
+      const room = MEDIA_SELECTION_LIMIT - current.length;
+      if (room <= 0) {
+        Alert.alert(
+          "Attachment limit reached",
+          `A message can carry up to ${MEDIA_SELECTION_LIMIT} photos or videos.`,
+        );
+        return current;
+      }
+      if (incoming.length > room) {
+        Alert.alert(
+          "Attachment limit reached",
+          `Only the first ${room} of those were added. A message can carry up to ${MEDIA_SELECTION_LIMIT} photos or videos.`,
+        );
+      }
+      return [...current, ...incoming.slice(0, room)];
+    });
+  }, []);
+
+  const pickMediaFromLibrary = useCallback(async () => {
     try {
       const mediaPermission =
         await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!mediaPermission.granted) {
         Alert.alert(
           "Photos permission needed",
-          "Please allow photo access to send images.",
+          "Please allow photo access to send images and videos.",
         );
         return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        mediaTypes: ["images", "videos"],
         quality: 0.9,
-        allowsMultipleSelection: false,
+        allowsMultipleSelection: true,
+        selectionLimit: MEDIA_SELECTION_LIMIT,
       });
-      if (result.canceled || !result.assets[0]) return;
-      const asset = result.assets[0];
-      const inferredMimeType =
-        asset.mimeType ??
-        (asset.uri.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg");
-      setPendingImage({
-        source: "picker",
-        previewUri: asset.uri,
-        localUri: asset.uri,
-        width: asset.width,
-        height: asset.height,
-        fileName: asset.fileName ?? undefined,
-        mimeType: inferredMimeType,
-        sizeBytes: asset.fileSize ?? undefined,
-      });
+      if (result.canceled || result.assets.length === 0) return;
+
+      appendPendingMedia(
+        result.assets.map((asset) => {
+          const isVideo = asset.type === "video";
+          const inferredMimeType =
+            asset.mimeType ??
+            (isVideo
+              ? "video/mp4"
+              : asset.uri.toLowerCase().endsWith(".png")
+                ? "image/png"
+                : "image/jpeg");
+          return {
+            id: makePendingMediaId(),
+            source: "picker" as const,
+            type: isVideo ? ("video" as const) : ("image" as const),
+            previewUri: asset.uri,
+            localUri: asset.uri,
+            width: asset.width,
+            height: asset.height,
+            durationMs: asset.duration ?? undefined,
+            fileName: asset.fileName ?? undefined,
+            mimeType: inferredMimeType,
+            sizeBytes: asset.fileSize ?? undefined,
+          };
+        }),
+      );
     } catch (error) {
-      console.error("Failed to pick image:", error);
+      console.error("Failed to pick media:", error);
       Alert.alert("Couldn't open your photo library.");
     }
-  }, []);
+  }, [appendPendingMedia, makePendingMediaId]);
 
   const pasteImageFromClipboard = useCallback(async () => {
     try {
@@ -710,19 +764,49 @@ const MessagingScreen = () => {
         return;
       }
       const isJpeg = clipboardImage.data.startsWith("data:image/jpeg");
-      setPendingImage({
-        source: "paste",
-        previewUri: clipboardImage.data,
-        dataUri: clipboardImage.data,
-        width: clipboardImage.size.width,
-        height: clipboardImage.size.height,
-        mimeType: isJpeg ? "image/jpeg" : "image/png",
-      });
+      appendPendingMedia([
+        {
+          id: makePendingMediaId(),
+          source: "paste",
+          type: "image",
+          previewUri: clipboardImage.data,
+          dataUri: clipboardImage.data,
+          width: clipboardImage.size.width,
+          height: clipboardImage.size.height,
+          mimeType: isJpeg ? "image/jpeg" : "image/png",
+        },
+      ]);
     } catch (error) {
       console.error("Failed to paste image:", error);
       Alert.alert("Couldn't paste image from clipboard.");
     }
+  }, [appendPendingMedia, makePendingMediaId]);
+
+  const removePendingMedia = useCallback((mediaId: string) => {
+    setPendingMedia((current) => current.filter((item) => item.id !== mediaId));
   }, []);
+
+  const previewPendingMedia = useCallback(
+    (mediaId: string) => {
+      const index = pendingMedia.findIndex((item) => item.id === mediaId);
+      if (index < 0) return;
+      setMediaViewer({
+        index,
+        items: pendingMedia.map((item) => ({
+          url: item.previewUri,
+          storagePath: item.id,
+          type: item.type,
+          width: item.width,
+          height: item.height,
+          durationMs: item.durationMs,
+          mimeType: item.mimeType,
+          fileName: item.fileName,
+          sizeBytes: item.sizeBytes,
+        })),
+      });
+    },
+    [pendingMedia],
+  );
 
   const openImageAttachmentActions = useCallback(async () => {
     let canPasteImage = false;
@@ -732,11 +816,11 @@ const MessagingScreen = () => {
       canPasteImage = false;
     }
 
-    Alert.alert("Add image", undefined, [
+    Alert.alert("Add attachment", undefined, [
       {
-        text: "Choose Photo",
+        text: "Choose Photos or Videos",
         onPress: () => {
-          void pickImageFromLibrary();
+          void pickMediaFromLibrary();
         },
       },
       ...(canPasteImage
@@ -754,7 +838,7 @@ const MessagingScreen = () => {
         style: "cancel",
       },
     ]);
-  }, [pasteImageFromClipboard, pickImageFromLibrary]);
+  }, [pasteImageFromClipboard, pickMediaFromLibrary]);
 
   const handleEdit = useCallback((id: string, text: string) => {
     setReplyingTo(null);
@@ -832,7 +916,7 @@ const MessagingScreen = () => {
     const valueToCopy =
       textValue.trim().length > 0
         ? textValue
-        : (targetMessage.image?.url ?? "");
+        : (getMessageMedia(targetMessage)[0]?.url ?? "");
 
     closeMessageActionSheet();
 
@@ -847,6 +931,27 @@ const MessagingScreen = () => {
       console.error("Failed to copy message:", error);
       Alert.alert("Couldn't copy message. Please try again.");
     }
+  }, [closeMessageActionSheet, messageActionSheet]);
+
+  const handleSaveMediaFromActionSheet = useCallback(async () => {
+    if (!messageActionSheet) return;
+    const media = getMessageMedia(messageActionSheet.message);
+    closeMessageActionSheet();
+    if (media.length === 0) return;
+
+    const { saved, failed, cancelled } = await saveAllMediaToDevice(media);
+    if (failed > 0) {
+      Alert.alert(
+        "Couldn't save everything",
+        saved > 0
+          ? `${saved} saved, ${failed} failed. Please try again.`
+          : "Please try again.",
+      );
+      return;
+    }
+    // A save that the user backed out of needs no confirmation, and on iOS the
+    // share sheet has already told them it worked.
+    void cancelled;
   }, [closeMessageActionSheet, messageActionSheet]);
 
   const handleEditFromActionSheet = useCallback(() => {
@@ -978,8 +1083,8 @@ const MessagingScreen = () => {
     const messageText = input.trim();
     if (
       !conversationId ||
-      (messageText.length === 0 && !pendingImage) ||
-      isSendingImage
+      (messageText.length === 0 && pendingMedia.length === 0) ||
+      isSendingMedia
     ) {
       return;
     }
@@ -994,21 +1099,29 @@ const MessagingScreen = () => {
         console.warn("Unable to refresh auth token before upload:", tokenError);
       }
 
-      let uploadedImage: MessageImage | undefined;
-      if (pendingImage) {
-        setIsSendingImage(true);
-        uploadedImage = await uploadConversationImage({
-          conversationId,
-          senderId: currentUser.uid,
-          localUri: pendingImage.localUri,
-          dataUri:
-            pendingImage.source === "paste" ? pendingImage.dataUri : undefined,
-          fileName: pendingImage.fileName,
-          mimeType: pendingImage.mimeType,
-          width: pendingImage.width,
-          height: pendingImage.height,
-          sizeBytes: pendingImage.sizeBytes,
-        });
+      // Uploaded one at a time so the progress label means something and so a
+      // dozen parallel uploads can't stall the connection.
+      const uploadedMedia: MessageMedia[] = [];
+      if (pendingMedia.length > 0) {
+        setIsSendingMedia(true);
+        for (const [index, item] of pendingMedia.entries()) {
+          setUploadProgress({ current: index + 1, total: pendingMedia.length });
+          uploadedMedia.push(
+            await uploadConversationMedia({
+              conversationId,
+              senderId: currentUser.uid,
+              mediaType: item.type,
+              localUri: item.localUri,
+              dataUri: item.source === "paste" ? item.dataUri : undefined,
+              fileName: item.fileName,
+              mimeType: item.mimeType,
+              width: item.width,
+              height: item.height,
+              durationMs: item.durationMs,
+              sizeBytes: item.sizeBytes,
+            }),
+          );
+        }
       }
 
       // Get sender's push token (if not already stored)
@@ -1018,12 +1131,7 @@ const MessagingScreen = () => {
       } catch {}
       const outgoingMessage: Parameters<typeof sendMessage>[1] = {
         text: messageText.length > 0 ? messageText : undefined,
-        image: uploadedImage,
-        kind: uploadedImage
-          ? messageText.length > 0
-            ? "mixed"
-            : "image"
-          : "text",
+        media: uploadedMedia.length > 0 ? uploadedMedia : undefined,
         sender: currentUser.uid,
         receiverId: contactIdValue,
         timestamp: Date.now(),
@@ -1038,7 +1146,7 @@ const MessagingScreen = () => {
       await sendMessage(conversationId, outgoingMessage);
       setInput("");
       setReplyingTo(null);
-      setPendingImage(null);
+      setPendingMedia([]);
     } catch (err) {
       console.error("Error sending message to Firestore:", err);
       const code =
@@ -1054,9 +1162,18 @@ const MessagingScreen = () => {
         code ? `${msg}\n\nCode: ${code}` : msg,
       );
     } finally {
-      setIsSendingImage(false);
+      setIsSendingMedia(false);
+      setUploadProgress(null);
     }
   };
+
+  const handleOpenMediaViewer = useCallback(
+    (media: MessageMedia[], index: number) => {
+      if (media.length === 0) return;
+      setMediaViewer({ items: media, index });
+    },
+    [],
+  );
 
   const messageListItems = useMemo(() => buildMessageListItems(messages), [messages]);
 
@@ -1079,14 +1196,19 @@ const MessagingScreen = () => {
         onJumpToOriginalMessage={jumpToOriginalMessage}
         onEditCancel={handleEditCancel}
         onEditSave={handleEditSave}
-        onViewerImageUriChange={setViewerImageUri}
+        onOpenMediaViewer={handleOpenMediaViewer}
         formatMessageTime={formatMessageTime}
       />
     );
   };
 
   const canSend =
-    (input.trim().length > 0 || Boolean(pendingImage)) && !isSendingImage;
+    (input.trim().length > 0 || pendingMedia.length > 0) && !isSendingMedia;
+
+  const sendingProgressLabel =
+    uploadProgress && uploadProgress.total > 1
+      ? `${uploadProgress.current} of ${uploadProgress.total}`
+      : null;
 
   return (
     <KeyboardAvoidingView
@@ -1151,21 +1273,23 @@ const MessagingScreen = () => {
           currentUserId={currentUserId}
           replyingTo={replyingTo}
           onClearReplyingTo={() => setReplyingTo(null)}
-          pendingImage={pendingImage}
-          onOpenViewerImage={(uri) => setViewerImageUri(uri)}
-          onClearPendingImage={() => setPendingImage(null)}
+          pendingMedia={pendingMedia}
+          onPreviewPendingMedia={previewPendingMedia}
+          onRemovePendingMedia={removePendingMedia}
+          onClearPendingMedia={() => setPendingMedia([])}
           inputRef={inputRef}
           input={input}
           onInputChange={handleInputChange}
           onOpenImageAttachmentActions={openImageAttachmentActions}
           onSend={handleSend}
           canSend={canSend}
-          isSendingImage={isSendingImage}
+          isSendingMedia={isSendingMedia}
+          sendingProgressLabel={sendingProgressLabel}
         />
       </View>
-      <ImageViewerModal
-        viewerImageUri={viewerImageUri}
-        onClose={() => setViewerImageUri(null)}
+      <MediaViewerModal
+        viewerState={mediaViewer}
+        onClose={() => setMediaViewer(null)}
       />
       <MessageActionSheetModal
         messageActionSheet={messageActionSheet}
@@ -1173,6 +1297,7 @@ const MessagingScreen = () => {
         onQuickEmojiReply={handleQuickEmojiReply}
         onReply={handleReplyFromActionSheet}
         onCopy={handleCopyFromActionSheet}
+        onSaveMedia={handleSaveMediaFromActionSheet}
         onEdit={handleEditFromActionSheet}
         onDelete={handleDeleteFromActionSheet}
       />

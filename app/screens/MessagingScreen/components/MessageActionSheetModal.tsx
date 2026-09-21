@@ -2,6 +2,7 @@ import { Modal, Pressable, ScrollView, Text, TouchableOpacity, View } from "reac
 import { QUICK_REPLY_EMOJIS } from "../constants";
 import styles from "../styles";
 import type { MessageActionSheetState } from "../types";
+import { getMessageMedia } from "../utils";
 
 type MessageActionSheetModalProps = {
   messageActionSheet: MessageActionSheetState | null;
@@ -9,6 +10,7 @@ type MessageActionSheetModalProps = {
   onQuickEmojiReply: (emoji: string) => void | Promise<void>;
   onReply: () => void;
   onCopy: () => void | Promise<void>;
+  onSaveMedia: () => void | Promise<void>;
   onEdit: () => void;
   onDelete: () => void;
 };
@@ -19,9 +21,16 @@ export const MessageActionSheetModal = ({
   onQuickEmojiReply,
   onReply,
   onCopy,
+  onSaveMedia,
   onEdit,
   onDelete,
 }: MessageActionSheetModalProps) => {
+  const mediaCount = messageActionSheet
+    ? getMessageMedia(messageActionSheet.message).length
+    : 0;
+  const saveLabel =
+    mediaCount > 1 ? `Save ${mediaCount} to Device` : "Save to Device";
+
   return (
     <Modal
       visible={Boolean(messageActionSheet)}
@@ -59,6 +68,16 @@ export const MessageActionSheetModal = ({
           >
             <Text style={styles.messageActionSheetRowText}>Copy</Text>
           </TouchableOpacity>
+          {mediaCount > 0 ? (
+            <TouchableOpacity
+              style={styles.messageActionSheetRow}
+              onPress={() => {
+                void onSaveMedia();
+              }}
+            >
+              <Text style={styles.messageActionSheetRowText}>{saveLabel}</Text>
+            </TouchableOpacity>
+          ) : null}
           {messageActionSheet?.isMe && messageActionSheet.canEdit ? (
             <TouchableOpacity style={styles.messageActionSheetRow} onPress={onEdit}>
               <Text style={styles.messageActionSheetRowText}>Edit</Text>
