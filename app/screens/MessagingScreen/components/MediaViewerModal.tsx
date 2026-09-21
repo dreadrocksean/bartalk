@@ -80,9 +80,10 @@ export const MediaViewerModal = ({
         width={width}
         height={height}
         isActive={index === activeIndex}
+        onPressBackdrop={onClose}
       />
     ),
-    [activeIndex, height, width],
+    [activeIndex, height, onClose, width],
   );
 
   return (
@@ -94,6 +95,9 @@ export const MediaViewerModal = ({
     >
       <View style={styles.mediaViewerBackdrop}>
         <FlatList
+          // A fresh list per opening, so `initialScrollIndex` is honoured even
+          // when the viewer is reopened before the last dismissal settles.
+          key={`${items[0]?.storagePath ?? items[0]?.url ?? "none"}-${openedAtIndex}`}
           data={items}
           renderItem={renderItem}
           keyExtractor={(item, index) => `${item.storagePath || item.url}-${index}`}

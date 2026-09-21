@@ -566,14 +566,6 @@ export const uploadConversationMedia = async (
   return uploaded;
 };
 
-/** @deprecated Use {@link uploadConversationMedia}. */
-export const uploadConversationImage = async (
-  input: Omit<UploadConversationMediaInput, "mediaType" | "durationMs">,
-): Promise<MessageImage> =>
-  stripMediaType(
-    await uploadConversationMedia({ ...input, mediaType: "image" }),
-  );
-
 export const editMessage = (
   conversationId: string,
   messageId: string,
