@@ -11,6 +11,7 @@ type MessageActionSheetModalProps = {
   onReply: () => void;
   onCopy: () => void | Promise<void>;
   onSaveMedia: () => void | Promise<void>;
+  onShareMedia: () => void | Promise<void>;
   onEdit: () => void;
   onDelete: () => void;
 };
@@ -22,14 +23,15 @@ export const MessageActionSheetModal = ({
   onReply,
   onCopy,
   onSaveMedia,
+  onShareMedia,
   onEdit,
   onDelete,
 }: MessageActionSheetModalProps) => {
   const mediaCount = messageActionSheet
     ? getMessageMedia(messageActionSheet.message).length
     : 0;
-  const saveLabel =
-    mediaCount > 1 ? `Save ${mediaCount} to Device` : "Save to Device";
+  const hasMedia = mediaCount > 0;
+  const saveLabel = mediaCount > 1 ? `Save ${mediaCount}` : "Save";
 
   return (
     <Modal
@@ -60,6 +62,18 @@ export const MessageActionSheetModal = ({
           <TouchableOpacity style={styles.messageActionSheetRow} onPress={onReply}>
             <Text style={styles.messageActionSheetRowText}>Reply</Text>
           </TouchableOpacity>
+          {/* On a photo or video the menu mirrors iOS: Save and Share join
+              Copy, and Copy puts the picture itself on the clipboard. */}
+          {hasMedia ? (
+            <TouchableOpacity
+              style={styles.messageActionSheetRow}
+              onPress={() => {
+                void onSaveMedia();
+              }}
+            >
+              <Text style={styles.messageActionSheetRowText}>{saveLabel}</Text>
+            </TouchableOpacity>
+          ) : null}
           <TouchableOpacity
             style={styles.messageActionSheetRow}
             onPress={() => {
@@ -68,14 +82,14 @@ export const MessageActionSheetModal = ({
           >
             <Text style={styles.messageActionSheetRowText}>Copy</Text>
           </TouchableOpacity>
-          {mediaCount > 0 ? (
+          {hasMedia ? (
             <TouchableOpacity
               style={styles.messageActionSheetRow}
               onPress={() => {
-                void onSaveMedia();
+                void onShareMedia();
               }}
             >
-              <Text style={styles.messageActionSheetRowText}>{saveLabel}</Text>
+              <Text style={styles.messageActionSheetRowText}>Share</Text>
             </TouchableOpacity>
           ) : null}
           {messageActionSheet?.isMe && messageActionSheet.canEdit ? (

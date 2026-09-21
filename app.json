@@ -52,6 +52,15 @@
           "photosPermission": "BarTalk needs access to your photos so you can send images in chat."
         }
       ],
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "BarTalk needs access to your photos so you can send images in chat.",
+          "savePhotosPermission": "BarTalk saves photos and videos from your chats to your library when you ask it to.",
+          "isAccessMediaLocationEnabled": false
+        }
+      ],
+      "expo-video",
       "expo-apple-authentication",
       [
         "expo-build-properties",

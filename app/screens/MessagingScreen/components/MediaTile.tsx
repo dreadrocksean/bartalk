@@ -1,4 +1,6 @@
 import { Image as ExpoImage } from "expo-image";
+import type { VideoThumbnail } from "expo-video";
+import { useEffect, useState } from "react";
 import {
   Text,
   View,
@@ -7,6 +9,7 @@ import {
   type ViewStyle,
 } from "react-native";
 import type { MessageMedia } from "../../../types/firestore";
+import { getVideoThumbnail } from "../../../utils/video-thumbnail";
 import styles from "../styles";
 import { formatMediaDuration } from "../utils";
 
@@ -19,11 +22,9 @@ type MediaTileProps = {
 };
 
 /**
- * One attachment at bubble size.
- *
- * Videos are drawn rather than played: this binary has no video component, and
- * pulling one in would cost a store release. Tapping opens the file in the
- * system viewer instead, which plays it with the platform's own controls.
+ * One attachment at bubble size. Videos show a poster frame with a play badge;
+ * they play in the viewer, not here, so a long chat never mounts more than one
+ * player at a time.
  */
 export const MediaTile = ({
   media,
@@ -32,12 +33,32 @@ export const MediaTile = ({
 }: MediaTileProps) => {
   const isVideo = media.type === "video";
   const duration = formatMediaDuration(media.durationMs);
+  const [poster, setPoster] = useState<VideoThumbnail | null>(null);
+
+  useEffect(() => {
+    if (!isVideo || !media.url) return;
+    let isActive = true;
+    void getVideoThumbnail(media.url, media.durationMs).then((thumbnail) => {
+      if (isActive) setPoster(thumbnail);
+    });
+    return () => {
+      isActive = false;
+    };
+  }, [isVideo, media.durationMs, media.url]);
 
   if (isVideo) {
     return (
       <View
         style={[styles.mediaTile, styles.videoTile, style as StyleProp<ViewStyle>]}
       >
+        {poster ? (
+          <ExpoImage
+            source={poster}
+            style={styles.mediaTileFill}
+            contentFit="cover"
+            transition={120}
+          />
+        ) : null}
         {showVideoChrome ? (
           <>
             <View style={styles.videoPlayBadge}>

@@ -562,6 +562,7 @@ export const uploadConversationMedia = async (
   if (mediaType === "video" && typeof durationMs === "number") {
     uploaded.durationMs = durationMs;
   }
+
   return uploaded;
 };
 

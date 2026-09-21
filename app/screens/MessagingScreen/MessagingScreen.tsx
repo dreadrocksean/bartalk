@@ -44,7 +44,11 @@ import {
   MessageDoc,
   MessageMedia,
 } from "../../types/firestore";
-import { saveAllMediaToDevice } from "../../utils/media-download";
+import {
+  copyMediaToClipboard,
+  saveAllMediaToDevice,
+  shareMedia,
+} from "../../utils/media-download";
 import type {
   MediaViewerState,
   MessageActionSheetState,
@@ -913,23 +917,43 @@ const MessagingScreen = () => {
     const targetMessage = messageActionSheet.message;
     const textValue =
       typeof targetMessage.text === "string" ? targetMessage.text : "";
-    const valueToCopy =
-      textValue.trim().length > 0
-        ? textValue
-        : (getMessageMedia(targetMessage)[0]?.url ?? "");
+    const media = getMessageMedia(targetMessage);
 
     closeMessageActionSheet();
 
-    if (!valueToCopy) {
+    // Text wins when there is any: copying a caption is what the user means by
+    // Copy on a message that has one. A bare attachment copies the picture.
+    if (textValue.trim().length === 0 && media.length > 0) {
+      const result = await copyMediaToClipboard(media[0]);
+      if (result.status === "failed") {
+        Alert.alert("Couldn't copy", result.reason);
+      }
+      return;
+    }
+
+    if (textValue.trim().length === 0) {
       Alert.alert("Nothing to copy");
       return;
     }
 
     try {
-      await Clipboard.setStringAsync(valueToCopy);
+      await Clipboard.setStringAsync(textValue);
     } catch (error) {
       console.error("Failed to copy message:", error);
       Alert.alert("Couldn't copy message. Please try again.");
+    }
+  }, [closeMessageActionSheet, messageActionSheet]);
+
+  const handleShareMediaFromActionSheet = useCallback(async () => {
+    if (!messageActionSheet) return;
+    const media = getMessageMedia(messageActionSheet.message);
+    closeMessageActionSheet();
+    if (media.length === 0) return;
+
+    // The sheet takes one file, so a stack shares the one on the front.
+    const result = await shareMedia(media[0]);
+    if (result.status === "failed") {
+      Alert.alert("Couldn't share", result.reason);
     }
   }, [closeMessageActionSheet, messageActionSheet]);
 
@@ -939,7 +963,7 @@ const MessagingScreen = () => {
     closeMessageActionSheet();
     if (media.length === 0) return;
 
-    const { saved, failed, cancelled } = await saveAllMediaToDevice(media);
+    const { saved, failed } = await saveAllMediaToDevice(media);
     if (failed > 0) {
       Alert.alert(
         "Couldn't save everything",
@@ -947,11 +971,7 @@ const MessagingScreen = () => {
           ? `${saved} saved, ${failed} failed. Please try again.`
           : "Please try again.",
       );
-      return;
     }
-    // A save that the user backed out of needs no confirmation, and on iOS the
-    // share sheet has already told them it worked.
-    void cancelled;
   }, [closeMessageActionSheet, messageActionSheet]);
 
   const handleEditFromActionSheet = useCallback(() => {
@@ -1298,6 +1318,7 @@ const MessagingScreen = () => {
         onReply={handleReplyFromActionSheet}
         onCopy={handleCopyFromActionSheet}
         onSaveMedia={handleSaveMediaFromActionSheet}
+        onShareMedia={handleShareMediaFromActionSheet}
         onEdit={handleEditFromActionSheet}
         onDelete={handleDeleteFromActionSheet}
       />

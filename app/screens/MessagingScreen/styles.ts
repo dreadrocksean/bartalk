@@ -527,17 +527,6 @@ export default StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-  mediaViewerVideoPlaceholder: {
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: unity * 24,
-  },
-  mediaViewerVideoHint: {
-    color: "rgba(255, 255, 255, 0.72)",
-    fontSize: unity * 14,
-    marginTop: unity * 16,
-    textAlign: "center",
-  },
   mediaViewerTopBar: {
     position: "absolute",
     left: 0,
@@ -561,6 +550,13 @@ export default StyleSheet.create({
     backgroundColor: "rgba(255, 255, 255, 0.16)",
     alignItems: "center",
     justifyContent: "center",
+  },
+  mediaViewerActions: {
+    flexDirection: "row",
+    alignItems: "center",
+  },
+  mediaViewerButtonTrailing: {
+    marginLeft: unity * 8,
   },
   mediaViewerButtonSpacer: {
     minWidth: unity * 64,
