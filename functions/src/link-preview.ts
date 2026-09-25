@@ -244,18 +244,6 @@ export const buildPreview = (
 const cacheKey = (url: string) =>
   createHash("sha1").update(url).digest("hex");
 
-const readCache = async (url: string): Promise<LinkPreview | null> => {
-  try {
-    const snap = await db.collection(CACHE_COLLECTION).doc(cacheKey(url)).get();
-    const data = snap.data();
-    if (!data) return null;
-    if (Date.now() - (data.fetchedAt ?? 0) > CACHE_TTL_MS) return null;
-    return (data.preview as LinkPreview | undefined) ?? null;
-  } catch {
-    return null;
-  }
-};
-
 const writeCache = async (url: string, preview: LinkPreview | null) => {
   try {
     await db
@@ -269,6 +257,56 @@ const writeCache = async (url: string, preview: LinkPreview | null) => {
   }
 };
 
+/**
+ * Works out the card for a stored message, using the shared URL cache.
+ *
+ * The URL is always taken from the message itself, never from a caller, so
+ * this can be reached from a callable without becoming an open fetch proxy.
+ *
+ * @param {FirebaseFirestore.DocumentData} message The message document.
+ * @return {Promise<LinkPreview | null>} The card, or null when there is none.
+ */
+const resolvePreviewForMessage = async (
+  message: FirebaseFirestore.DocumentData,
+): Promise<LinkPreview | null> => {
+  // A message that already shows a picture does not also want a card.
+  const hasMedia =
+    (Array.isArray(message.media) && message.media.length > 0) ||
+    Boolean(message.image?.url);
+  if (hasMedia) return null;
+
+  const text = typeof message.text === "string" ? message.text : "";
+  const found = text.match(URL_IN_TEXT)?.[0];
+  if (!found) return null;
+
+  const normalized = /^https?:\/\//i.test(found) ? found : `https://${found}`;
+  let target: URL;
+  try {
+    target = new URL(normalized);
+  } catch {
+    return null;
+  }
+
+  const cacheDoc = await db
+    .collection(CACHE_COLLECTION)
+    .doc(cacheKey(target.toString()))
+    .get();
+  const cachedData = cacheDoc.data();
+  const fetchedAt = cachedData?.fetchedAt ?? 0;
+  const isFresh =
+    Boolean(cachedData) && Date.now() - fetchedAt <= CACHE_TTL_MS;
+  if (isFresh) {
+    return (cachedData?.preview as LinkPreview | undefined) ?? null;
+  }
+
+  const fetched = await fetchHtml(target);
+  const preview = fetched ? buildPreview(fetched.html, fetched.finalUrl) : null;
+  // A miss is cached too: a page with no card should not be refetched by
+  // every device that scrolls past the message.
+  await writeCache(target.toString(), preview);
+  return preview;
+};
+
 export const attachLinkPreview = runWith({maxInstances: 10, timeoutSeconds: 30})
   .firestore
   .document("conversations/{conversationId}/messages/{messageId}")
@@ -280,35 +318,7 @@ export const attachLinkPreview = runWith({maxInstances: 10, timeoutSeconds: 30})
       const message = snap.data();
       if (!message) return null;
 
-      // A message that already shows a picture does not also want a card.
-      const hasMedia =
-        (Array.isArray(message.media) && message.media.length > 0) ||
-        Boolean(message.image?.url);
-      if (hasMedia) return null;
-
-      const text = typeof message.text === "string" ? message.text : "";
-      const found = text.match(URL_IN_TEXT)?.[0];
-      if (!found) return null;
-
-      const normalized = /^https?:\/\//i.test(found) ?
-        found :
-        `https://${found}`;
-      let target: URL;
-      try {
-        target = new URL(normalized);
-      } catch {
-        return null;
-      }
-
-      const cached = await readCache(target.toString());
-      let preview = cached;
-
-      if (!cached) {
-        const fetched = await fetchHtml(target);
-        preview = fetched ? buildPreview(fetched.html, fetched.finalUrl) : null;
-        await writeCache(target.toString(), preview);
-      }
-
+      const preview = await resolvePreviewForMessage(message);
       if (!preview) return null;
 
       try {
@@ -323,3 +333,74 @@ export const attachLinkPreview = runWith({maxInstances: 10, timeoutSeconds: 30})
       return null;
     },
   );
+
+/**
+ * Fills in the card for a message that predates the trigger.
+ *
+ * Called by the app when it renders a message that carries a link but has no
+ * card, so history fills in as it is read rather than in one sweep over
+ * conversations nobody opens.
+ *
+ * @return {Promise<{preview: LinkPreview | null}>} The card, if there is one.
+ */
+export const requestLinkPreview = runWith({
+  maxInstances: 10,
+  timeoutSeconds: 30,
+})
+  .https
+  .onCall(async (data: unknown, context: functions.https.CallableContext) => {
+    const callerId = context.auth?.uid;
+    if (!callerId) {
+      throw new functions.https.HttpsError(
+        "unauthenticated",
+        "Sign in to load link previews.",
+      );
+    }
+
+    const {conversationId, messageId} = (data ?? {}) as {
+      conversationId?: unknown;
+      messageId?: unknown;
+    };
+    if (typeof conversationId !== "string" || typeof messageId !== "string") {
+      throw new functions.https.HttpsError(
+        "invalid-argument",
+        "A conversation and message are required.",
+      );
+    }
+
+    const conversation = await db
+      .collection("conversations")
+      .doc(conversationId)
+      .get();
+    const participants = conversation.data()?.participants;
+    if (!Array.isArray(participants) || !participants.includes(callerId)) {
+      // Same answer whether the conversation is missing or simply not theirs,
+      // so this cannot be used to discover which conversations exist.
+      throw new functions.https.HttpsError(
+        "permission-denied",
+        "That conversation is not yours.",
+      );
+    }
+
+    const messageRef = conversation.ref.collection("messages").doc(messageId);
+    const messageSnap = await messageRef.get();
+    const message = messageSnap.data();
+    if (!message) return {preview: null};
+    if (message.linkPreview) {
+      return {preview: message.linkPreview as LinkPreview};
+    }
+
+    const preview = await resolvePreviewForMessage(message);
+    if (!preview) return {preview: null};
+
+    try {
+      await messageRef.update({linkPreview: preview});
+    } catch (error) {
+      functions.logger.warn("Could not backfill link preview", {
+        conversationId,
+        messageId,
+        error: String(error),
+      });
+    }
+    return {preview};
+  });

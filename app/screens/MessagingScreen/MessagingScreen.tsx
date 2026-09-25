@@ -1209,6 +1209,7 @@ const MessagingScreen = () => {
     return (
       <MessageRow
         message={item.message}
+        conversationId={conversationId}
         currentUserId={currentUserId}
         highlightedMessageId={highlightedMessageId}
         editingId={editingId}

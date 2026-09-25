@@ -13,7 +13,7 @@ export {
   createPairingCode,
   redeemPairingCode,
 } from "./guardianship";
-export {attachLinkPreview} from "./link-preview";
+export {attachLinkPreview, requestLinkPreview} from "./link-preview";
 export {onLocationWrite} from "./sharing-health";
 export {
   onTrackingLinkWrite,

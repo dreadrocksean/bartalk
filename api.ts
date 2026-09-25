@@ -16,15 +16,20 @@ import firestore, {
   updateDoc,
   where,
 } from "@react-native-firebase/firestore";
+import {
+  getFunctions,
+  httpsCallable,
+} from "@react-native-firebase/functions";
 import { Alert, Platform } from "react-native";
 import type {
   MessageImage,
+  MessageLinkPreview,
   MessageKind,
   MessageMedia,
   MessageMediaType,
   ReplyReference,
 } from "./app/types/firestore";
-import { getFirebaseDb, getFirebaseStorage } from "./firebase";
+import { getFirebaseApp, getFirebaseDb, getFirebaseStorage } from "./firebase";
 
 // ***************************//
 // -----------Setup-----------//
@@ -577,6 +582,22 @@ export const uploadConversationMedia = async (
   }
 
   return uploaded;
+};
+
+/**
+ * Asks the backend for the card belonging to a message that predates link
+ * previews. The URL is read from the stored message, never sent from here.
+ */
+export const requestLinkPreview = async (
+  conversationId: string,
+  messageId: string,
+) => {
+  const callable = httpsCallable<
+    { conversationId: string; messageId: string },
+    { preview: MessageLinkPreview | null }
+  >(getFunctions(getFirebaseApp()), "requestLinkPreview");
+  const result = await callable({ conversationId, messageId });
+  return result.data.preview;
 };
 
 export const editMessage = (

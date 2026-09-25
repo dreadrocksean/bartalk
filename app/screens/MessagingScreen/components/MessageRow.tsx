@@ -13,12 +13,15 @@ import {
 import styles from "../styles";
 import { getMessageMedia } from "../utils";
 import { splitIntoLinkParts } from "../../../utils/linkify";
+import { useLinkPreviewBackfill } from "../use-link-preview-backfill";
 import { LinkPreviewCard } from "./LinkPreviewCard";
 import { MediaStack } from "./MediaStack";
 import { MessageText } from "./MessageText";
 
 type MessageRowProps = {
   message: MessageDoc;
+  /** Needed to ask the backend for a card on older messages. */
+  conversationId: string | null;
   currentUserId: string | null;
   highlightedMessageId: string | null;
   editingId: string | null;
@@ -39,6 +42,7 @@ type MessageRowProps = {
 
 export const MessageRow = ({
   message,
+  conversationId,
   currentUserId,
   highlightedMessageId,
   editingId,
@@ -87,6 +91,9 @@ export const MessageRow = ({
   );
   const hasReaction = reactionBadges.length > 0;
   const swipeableRef = useRef<SwipeableMethods | null>(null);
+
+  // Messages from before link previews existed get their card on first sight.
+  useLinkPreviewBackfill(conversationId, message);
 
   return (
     <View
