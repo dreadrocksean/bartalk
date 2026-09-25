@@ -175,6 +175,37 @@ export default StyleSheet.create({
   bubbleTextOther: {
     color: Colors.light.bubbleTextOther,
   },
+  linkPreviewCard: {
+    width: unity * 220,
+    marginTop: unity * 8,
+    borderRadius: unity * 14,
+    overflow: "hidden",
+    // Translucent white reads on the sender's amber bubble and the receiver's
+    // grey one alike, so the card needs no per-side variant.
+    backgroundColor: "rgba(255, 255, 255, 0.94)",
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: "rgba(0, 0, 0, 0.08)",
+  },
+  linkPreviewImage: {
+    width: "100%",
+    // The shape Open Graph images are cropped to.
+    aspectRatio: 1.91,
+    backgroundColor: "rgba(0, 0, 0, 0.06)",
+  },
+  linkPreviewBody: {
+    paddingHorizontal: unity * 10,
+    paddingVertical: unity * 8,
+  },
+  linkPreviewTitle: {
+    fontSize: unity * 13,
+    fontWeight: "600",
+    color: "#111827",
+  },
+  linkPreviewDomain: {
+    fontSize: unity * 11,
+    color: "#6B7280",
+    marginTop: unity * 2,
+  },
   messageLink: {
     textDecorationLine: "underline",
     fontWeight: "600",

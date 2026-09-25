@@ -40,6 +40,18 @@ export type MessageMedia = MessageImage & {
   durationMs?: number;
 };
 
+/**
+ * The card shown for a link in a message. Filled in by the backend shortly
+ * after the message is written, so it arrives a moment later than the text.
+ */
+export type MessageLinkPreview = {
+  url: string;
+  title?: string;
+  description?: string;
+  imageUrl?: string;
+  siteName?: string;
+};
+
 export type MessageReactions = {
   [userId: string]: string;
 };
@@ -56,6 +68,7 @@ export type MessageDoc = {
   image?: MessageImage;
   /** Every attachment, in the order the sender picked them. */
   media?: MessageMedia[];
+  linkPreview?: MessageLinkPreview;
   sender: string;
   receiverId: string;
   timestamp: number;

@@ -1,6 +1,6 @@
-import * as WebBrowser from "expo-web-browser";
-import { Alert, Linking, Text } from "react-native";
+import { Text } from "react-native";
 import { splitIntoLinkParts } from "../../../utils/linkify";
+import { openLink } from "../../../utils/open-link";
 import styles from "../styles";
 
 type MessageTextProps = {
@@ -8,26 +8,6 @@ type MessageTextProps = {
   isMe: boolean;
   /** Holding a link has to still reach the message's own action sheet. */
   onLongPress: () => void;
-};
-
-const openLink = async (href: string) => {
-  try {
-    // Web pages open in place, which keeps the conversation a back-swipe away.
-    // Mail and phone links have to leave for the app that handles them.
-    if (/^https?:/i.test(href)) {
-      await WebBrowser.openBrowserAsync(href);
-      return;
-    }
-    const canOpen = await Linking.canOpenURL(href);
-    if (!canOpen) {
-      Alert.alert("Nothing here can open that link.");
-      return;
-    }
-    await Linking.openURL(href);
-  } catch (error) {
-    console.error("Failed to open link:", error);
-    Alert.alert("Couldn't open that link.");
-  }
 };
 
 /** A message's text, with any URLs, addresses and numbers made tappable. */

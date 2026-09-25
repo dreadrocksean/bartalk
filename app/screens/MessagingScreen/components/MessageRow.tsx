@@ -12,6 +12,8 @@ import {
 } from "../constants";
 import styles from "../styles";
 import { getMessageMedia } from "../utils";
+import { splitIntoLinkParts } from "../../../utils/linkify";
+import { LinkPreviewCard } from "./LinkPreviewCard";
 import { MediaStack } from "./MediaStack";
 import { MessageText } from "./MessageText";
 
@@ -58,6 +60,14 @@ export const MessageRow = ({
   const hasText = messageText.trim().length > 0;
   const messageMedia = getMessageMedia(message);
   const hasMedia = messageMedia.length > 0;
+  const linkPreview = message.linkPreview;
+  // A message that is nothing but a link shows the card alone, the way iMessage
+  // does; the URL itself would only repeat what the card already says.
+  const linkParts = hasText ? splitIntoLinkParts(messageText.trim()) : [];
+  const isBareLink =
+    Boolean(linkPreview) &&
+    linkParts.length === 1 &&
+    linkParts[0].type === "link";
   const messageTime = formatTime(message.timestamp);
   const reactionCounts = new Map<string, number>();
   Object.values(message.reactions ?? {}).forEach((reactionEmoji) => {
@@ -240,10 +250,16 @@ export const MessageRow = ({
                   </Text>
                 </TouchableOpacity>
               ) : null}
-              {hasText ? (
+              {hasText && !isBareLink ? (
                 <MessageText
                   text={messageText}
                   isMe={isMe}
+                  onLongPress={() => onMessageLongPress(message, isMe)}
+                />
+              ) : null}
+              {linkPreview ? (
+                <LinkPreviewCard
+                  preview={linkPreview}
                   onLongPress={() => onMessageLongPress(message, isMe)}
                 />
               ) : null}
