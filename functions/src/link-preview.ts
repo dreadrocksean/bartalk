@@ -133,6 +133,8 @@ const metaContent = (html: string, keys: string[]): string | undefined => {
 /**
  * Follows redirects by hand so every hop is checked, not just the first.
  *
+ * Exported, with buildPreview, so both can be run against real pages offline.
+ *
  * @param {URL} startUrl Where to begin.
  * @return {Promise<{html: string, finalUrl: URL} | null>} Page source and the
  *   URL it finally came from, or null when it could not be read safely.
@@ -194,7 +196,10 @@ export const fetchHtml = async (
  * @param {URL} finalUrl The URL the source came from, after redirects.
  * @return {LinkPreview | null} The card, or null when there is too little.
  */
-export const buildPreview = (html: string, finalUrl: URL): LinkPreview | null => {
+export const buildPreview = (
+  html: string,
+  finalUrl: URL,
+): LinkPreview | null => {
   const title =
     metaContent(html, ["og:title", "twitter:title"]) ??
     decodeEntities(html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] ?? "");
