@@ -14,6 +14,13 @@ export const SWIPE_ANIMATION_OPTIONS = {
   bounciness: 6,
 } as const;
 
+/**
+ * Kept in step with PREVIEW_VERSION in the backend. A card written by an older
+ * build is asked for again the first time it is read, so a fix to how cards
+ * are built reaches history without migrating anything.
+ */
+export const LINK_PREVIEW_VERSION = 2;
+
 /** How many attachments one message may carry. */
 export const MEDIA_SELECTION_LIMIT = 10;
 

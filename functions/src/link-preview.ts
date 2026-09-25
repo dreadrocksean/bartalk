@@ -22,6 +22,12 @@ const MAX_REDIRECTS = 3;
 const MAX_BYTES = 512 * 1024;
 const CACHE_COLLECTION = "linkPreviews";
 const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+/**
+ * Bumped whenever a card made by an older build would come out wrong. Cards
+ * and cache entries below it are rebuilt on sight, which beats migrating
+ * every message that already has one.
+ */
+export const PREVIEW_VERSION = 2;
 
 const URL_IN_TEXT = /(?:https?:\/\/|www\.)[^\s<>"']+/i;
 
@@ -31,6 +37,7 @@ export type LinkPreview = {
   description?: string;
   imageUrl?: string;
   siteName?: string;
+  version?: number;
 };
 
 /**
@@ -91,13 +98,19 @@ const isSafeUrl = async (candidate: URL): Promise<boolean> => {
 
 const decodeEntities = (value: string): string =>
   value
-    .replace(/&(?:amp|#38);/gi, "&")
-    .replace(/&(?:lt|#60);/gi, "<")
-    .replace(/&(?:gt|#62);/gi, ">")
-    .replace(/&(?:quot|#34);/gi, "\"")
-    .replace(/&(?:apos|#39);/gi, "'")
-    .replace(/&(?:nbsp|#160);/gi, " ")
+    // Numeric forms first, and hex as well as decimal: page titles are full of
+    // &#x27; and &#xb7;, and leaving them raw puts the escape on screen.
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) =>
+      String.fromCodePoint(parseInt(code, 16)),
+    )
     .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&(?:apos|#39);/gi, "'")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/\s+/g, " ")
     .trim();
 
 /**
@@ -234,7 +247,11 @@ export const buildPreview = (
   // A card with neither a picture nor a title says less than the link itself.
   if (!title && !imageUrl) return null;
 
-  const preview: LinkPreview = {url: finalUrl.toString(), siteName};
+  const preview: LinkPreview = {
+    url: finalUrl.toString(),
+    siteName,
+    version: PREVIEW_VERSION,
+  };
   if (title) preview.title = title.slice(0, 200);
   if (description) preview.description = description.slice(0, 300);
   if (imageUrl) preview.imageUrl = imageUrl;
@@ -249,7 +266,7 @@ const writeCache = async (url: string, preview: LinkPreview | null) => {
     await db
       .collection(CACHE_COLLECTION)
       .doc(cacheKey(url))
-      .set({url, preview, fetchedAt: Date.now()});
+      .set({url, preview, fetchedAt: Date.now(), version: PREVIEW_VERSION});
   } catch (error) {
     functions.logger.info("Could not cache link preview", {
       error: String(error),
@@ -294,7 +311,9 @@ const resolvePreviewForMessage = async (
   const cachedData = cacheDoc.data();
   const fetchedAt = cachedData?.fetchedAt ?? 0;
   const isFresh =
-    Boolean(cachedData) && Date.now() - fetchedAt <= CACHE_TTL_MS;
+    Boolean(cachedData) &&
+    cachedData?.version === PREVIEW_VERSION &&
+    Date.now() - fetchedAt <= CACHE_TTL_MS;
   if (isFresh) {
     return (cachedData?.preview as LinkPreview | undefined) ?? null;
   }
@@ -386,8 +405,9 @@ export const requestLinkPreview = runWith({
     const messageSnap = await messageRef.get();
     const message = messageSnap.data();
     if (!message) return {preview: null};
-    if (message.linkPreview) {
-      return {preview: message.linkPreview as LinkPreview};
+    const existing = message.linkPreview as LinkPreview | undefined;
+    if (existing && existing.version === PREVIEW_VERSION) {
+      return {preview: existing};
     }
 
     const preview = await resolvePreviewForMessage(message);

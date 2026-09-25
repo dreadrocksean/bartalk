@@ -50,6 +50,8 @@ export type MessageLinkPreview = {
   description?: string;
   imageUrl?: string;
   siteName?: string;
+  /** See LINK_PREVIEW_VERSION: older cards are rebuilt when they are read. */
+  version?: number;
 };
 
 export type MessageReactions = {

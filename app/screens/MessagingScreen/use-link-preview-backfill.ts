@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { requestLinkPreview } from "../../../api";
 import type { MessageDoc } from "../../types/firestore";
 import { hasLink } from "../../utils/linkify";
+import { LINK_PREVIEW_VERSION } from "./constants";
 import { getMessageMedia } from "./utils";
 
 /**
@@ -34,7 +35,8 @@ const schedule = (task: () => Promise<void>) => {
 };
 
 /**
- * Fills in the card for a message written before link previews existed.
+ * Fills in the card for a message written before link previews existed, or
+ * rebuilds one made by a build that got it wrong.
  *
  * Runs from the message row, so only history actually scrolled to is fetched
  * — a sweep over every conversation would fetch pages nobody is reading. The
@@ -47,7 +49,8 @@ export const useLinkPreviewBackfill = (
 ) => {
   useEffect(() => {
     if (!conversationId) return;
-    if (message.linkPreview) return;
+    // A card from an older build is rebuilt rather than left as it is.
+    if (message.linkPreview?.version === LINK_PREVIEW_VERSION) return;
     if (getMessageMedia(message).length > 0) return;
 
     const text = typeof message.text === "string" ? message.text : "";
