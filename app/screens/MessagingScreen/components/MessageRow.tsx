@@ -13,6 +13,7 @@ import {
 import styles from "../styles";
 import { getMessageMedia } from "../utils";
 import { MediaStack } from "./MediaStack";
+import { MessageText } from "./MessageText";
 
 type MessageRowProps = {
   message: MessageDoc;
@@ -240,14 +241,11 @@ export const MessageRow = ({
                 </TouchableOpacity>
               ) : null}
               {hasText ? (
-                <Text
-                  style={[
-                    styles.bubbleText,
-                    isMe ? styles.bubbleTextMe : styles.bubbleTextOther,
-                  ]}
-                >
-                  {messageText}
-                </Text>
+                <MessageText
+                  text={messageText}
+                  isMe={isMe}
+                  onLongPress={() => onMessageLongPress(message, isMe)}
+                />
               ) : null}
               {hasMedia ? (
                 <View style={hasText ? styles.messageImageWrapWithText : null}>

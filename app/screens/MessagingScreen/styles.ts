@@ -175,6 +175,18 @@ export default StyleSheet.create({
   bubbleTextOther: {
     color: Colors.light.bubbleTextOther,
   },
+  messageLink: {
+    textDecorationLine: "underline",
+    fontWeight: "600",
+  },
+  messageLinkMe: {
+    // The sender's bubble is already amber, so the tint would disappear into
+    // it; the underline carries the affordance instead.
+    color: Colors.light.bubbleTextMe,
+  },
+  messageLinkOther: {
+    color: colorShade(Colors.light.tint, -25),
+  },
   edited: {
     fontSize: unity * 12,
     color: "#888",
