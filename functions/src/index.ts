@@ -74,11 +74,34 @@ export const sendPushNotification = runWith({maxInstances: 10})
       // be sent. A receiver with no push token, or one whose device matches the
       // sender's, still has an unread message — bailing out below must not cost
       // them the count. Reset to zero when they open the conversation.
+      //
+      // In a transaction, and skipped when the receiver has already read this
+      // far. This trigger can run seconds after the message was written, by
+      // which time a receiver sitting in the conversation has read it and
+      // zeroed their count; a blind increment then lands afterwards and leaves
+      // a badge that nothing clears. The transaction also covers the inverse
+      // order, because the read receipt is in its read set: a clear that lands
+      // mid-flight forces a retry, and the retry sees the receipt and skips.
       try {
-        await db
+        const conversationRef = db
           .collection("conversations")
-          .doc(context.params.conversationId as string)
-          .set(
+          .doc(context.params.conversationId as string);
+        const messageTimestamp =
+          typeof message.timestamp === "number" ? message.timestamp : null;
+
+        await db.runTransaction(async (tx) => {
+          const snapshot = await tx.get(conversationRef);
+          const receipt = snapshot.data()
+            ?.readReceipts?.[normalizedReceiverId];
+          const readUpTo = receipt?.lastMessageTimestamp;
+          const alreadyRead =
+            typeof readUpTo === "number" &&
+            messageTimestamp !== null &&
+            readUpTo >= messageTimestamp;
+          if (alreadyRead) return;
+
+          tx.set(
+            conversationRef,
             {
               unreadCounts: {
                 [normalizedReceiverId]: admin.firestore.FieldValue.increment(1),
@@ -86,6 +109,7 @@ export const sendPushNotification = runWith({maxInstances: 10})
             },
             {merge: true},
           );
+        });
       } catch (error) {
         // A failed count must never swallow the notification itself.
         functions.logger.error("Failed to increment unread count", {

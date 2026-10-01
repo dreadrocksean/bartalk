@@ -782,9 +782,22 @@ export const listenForUnreadCounts = (
             typeof raw === "number" && Number.isFinite(raw) && raw > 0 ?
               Math.floor(raw) :
               0;
-          if (count > 0) {
-            counts[other] = (counts[other] ?? 0) + count;
-          }
+          if (count === 0) return;
+
+          // The counter is a server-side tally and the read receipt is a
+          // pointer, and the two can disagree: a counter incremented just
+          // after the conversation was cleared leaves a badge for a message
+          // already read. The receipt wins, which also heals counters that
+          // drifted before this check existed.
+          const readUpTo = data.readReceipts?.[userId]?.lastMessageTimestamp;
+          const newest = data.lastMessage?.timestamp;
+          const readEverything =
+            typeof readUpTo === "number" &&
+            typeof newest === "number" &&
+            readUpTo >= newest;
+          if (readEverything) return;
+
+          counts[other] = (counts[other] ?? 0) + count;
         },
       );
       callback(counts);
